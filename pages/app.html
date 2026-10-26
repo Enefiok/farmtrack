@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgroFlow</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/pages/app.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">AgroFlow</div>
+      <div class="farm-wrap">
+        <button class="farm-btn" id="farm-btn" data-menu="farm-menu" aria-haspopup="true"></button>
+        <div class="menu left" id="farm-menu" hidden></div>
+      </div>
+      <nav id="nav" aria-label="Main"></nav>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="icon-btn" id="menu-btn" aria-label="Open menu" aria-controls="sidebar"></button>
+        <label class="search" id="search-box"></label>
+        <div class="spacer"></div>
+        <div class="menu-wrap">
+          <button class="icon-btn" data-menu="bell-menu" aria-label="Notifications" aria-haspopup="true" id="bell-btn"></button>
+          <div class="menu" id="bell-menu" hidden><span class="note">No new notifications.</span></div>
+        </div>
+        <div class="menu-wrap">
+          <button class="user-btn" data-menu="user-menu" aria-haspopup="true" id="user-btn"></button>
+          <div class="menu" id="user-menu" hidden></div>
+        </div>
+      </header>
+      <main id="view" tabindex="-1"></main>
+    </div>
+  </div>
+  <div id="modal-root"></div>
+  <div id="toast-root" aria-live="polite"></div>
+  <noscript>AgroFlow needs JavaScript to run.</noscript>
+
+<script src="../js/core/api.js"></script>
+<script src="../js/pages/app.js"></script>
+</body>
+</html>

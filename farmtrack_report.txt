@@ -1,0 +1,172 @@
+﻿=== STRUCTURE ===
+farmtrack_report.txt
+restructure-report.txt
+assets\fonts\.gitkeep
+assets\icons\.gitkeep
+assets\images\farm_track_pic.jpg
+css\base\.gitkeep
+css\components\.gitkeep
+css\layout\.gitkeep
+css\pages\app.css
+css\pages\login.css
+css\pages\register.css
+js\components\.gitkeep
+js\core\api.js
+js\pages\app.js
+js\pages\login.js
+js\pages\register.js
+js\utils\.gitkeep
+pages\app.html
+pages\auth\login.html
+pages\auth\register.html
+pages\farm\.gitkeep
+pages\records\.gitkeep
+pages\setup\.gitkeep
+pages\users\.gitkeep
+partials\.gitkeep
+
+=== BACKEND CALLS ===
+js\core\api.js:9: API_BASE: "http://127.0.0.1:8000",
+js\core\api.js:11: csrf: "/api/auth/csrf/",
+js\core\api.js:12: register: "/api/auth/register/",
+js\core\api.js:13: login: "/api/auth/login/",
+js\core\api.js:14: logout: "/api/auth/logout/",
+js\core\api.js:15: me: "/api/auth/me/",
+js\core\api.js:16: farms: "/api/farms/",
+js\core\api.js:26: flocks: "/api/farms/{farm}/flocks/",
+js\core\api.js:27: activities: "/api/farms/{farm}/activities/",
+js\core\api.js:28: production: "/api/farms/{farm}/production/",
+js\core\api.js:29: items: "/api/farms/{farm}/items/",
+js\core\api.js:30: units: "/api/units/",
+js\core\api.js:126: async function csrfToken(force) {
+js\core\api.js:127: const existing = cookie("csrftoken");
+js\core\api.js:130: const res = await fetch(CONFIG.API_BASE + CONFIG.ENDPOINTS.csrf, {
+js\core\api.js:131: credentials: "include",
+js\core\api.js:136: return (d && (d.csrfToken || d.csrf_token)) || cookie("csrftoken") || "";
+js\core\api.js:145: if (method !== "GET") headers["X-CSRFToken"] = await csrfToken(!!retried);
+js\core\api.js:148: res = await fetch(CONFIG.API_BASE + path, {
+js\core\api.js:150: credentials: "include",
+js\core\api.js:186: if (!u || u.password !== p.password) throw new ApiError(400, { non_field_errors: ["Unable to log in with provided credentials."] });
+js\core\api.js:194: if (!s) throw new ApiError(401, { detail: "Authentication credentials were not provided." });
+js\core\api.js:201: if (!s) throw new ApiError(401, { detail: "Authentication credentials were not provided." });
+js\core\api.js:204: createFarm: async function(v) {
+js\core\api.js:207: if (!s) throw new ApiError(401, { detail: "Authentication credentials were not provided." });
+js\core\api.js:378: const csrfBlocked = logoutError && logoutError.status === 403 && /csrf/i.test(logoutError.message);
+js\core\api.js:379: throw new ApiError(0, null, csrfBlocked
+js\core\api.js:380: ? "Sign out was blocked by CSRF: " + logoutError.message
+js\core\api.js:428: createFarm: async function(v) {
+js\core\api.js:429: if (isMock) return normFarm(await mock.createFarm(v));
+js\pages\app.js:11: logoutUrl: "/api/auth/logout/",
+js\pages\app.js:92: with fetch() calls when the backend endpoints exist.
+js\pages\app.js:116: // Stand-in for GET /api/farms/
+js\pages\app.js:127: // Stand-in for POST /api/farms/  ->  { farm: { id, name }, role: "OWNER" }
+js\pages\app.js:128: async createFarm(v) {
+js\pages\app.js:129: if (!DEV) { const f = await AgroAPI.createFarm(v); state.farms.push(f); return f; }
+js\pages\app.js:939: const f = await api.createFarm(clean);
+
+=== FARM SETUP HTML ===
+
+
+=== createFarm in api.js ===
+      const key = type === "activity" ? "activities" : type === "flock" ? "flocks" : "production";
+      if (isMock) { 
+        await wait(300); 
+        return { id: "m" + Date.now().toString(36) }; 
+      }
+      
+      const body = await recordBody(type, farmId, v);
+      const d = await request("POST", farmUrl(key, farmId), body);
+      const rec = (d && (d.flock || d.activity || d.production || d)) || {};
+      return { id: rec.id };
+    },
+    
+    createFarm: async function(v) {
+      if (isMock) return normFarm(await mock.createFarm(v));
+      
+      const payload = {
+        name: String(v.name).trim(),
+        location: String(v.location || "").trim(),
+        contact_info: String(v.contact_info || "").trim()
+      };
+      
+      const d = await request("POST", E.farms, payload);
+      const created = (d && d.farm) || d || {};
+      
+      const farm = normFarm({ 
+        ...created, 
+        role: (d && d.role) || "OWNER",
+        settings: created.settings || { 
+          currency: "NGN", 
+          timezone: "Africa/Lagos", 
+          unit_system: "metric" 
+        }
+      });
+      
+      const cache = LS.get(K_FARM_CACHE + currentEmail, []);
+      cache.push(farm);
+      LS.set(K_FARM_CACHE + currentEmail, cache);
+      
+      return farm;
+    },
+  };
+
+  global.AgroAPI = AgroAPI;
+})(window);
+
+=== FARM LINES IN app.js ===
+30: const currencyCode = () => (farm() && farm().settings && farm().settings.currency) || CONFIG.currency;
+99: farms: [],      // filled by api.loadFarms()
+100: farmId: null,
+108: const farm = () => state.farms.find((f) => f.id === state.farmId) || null;
+110: const storeKey = () => `agroflow:v1:${state.farmId}`;
+114: const farmsKey = "agroflow:v1:farms";
+116: // Stand-in for GET /api/farms/
+117: async loadFarms() {
+119: if (!DEV) { state.farms = await AgroAPI.listFarms(); return; }
+122: try { saved = JSON.parse(localStorage.getItem(farmsKey)); } catch { /* ignore */ }
+123: state.farms = saved || (params.has("demo")
+124: ? [{ id: "greenfield", name: "Greenfield farm", location: "Ogun state, Nigeria", settings: { currency: "NGN", timezone: "Africa/Lagos", unit_system: "metric" } }]
+127: // Stand-in for POST /api/farms/  ->  { farm: { id, name }, role: "OWNER" }
+128: async createFarm(v) {
+129: if (!DEV) { const f = await AgroAPI.createFarm(v); state.farms.push(f); return f; }
+133: state.farms.push(f);
+134: try { localStorage.setItem(farmsKey, JSON.stringify(state.farms)); } catch { /* ignore */ }
+147: serverId = (await AgroAPI.createRecord(type, state.farmId, values)).id;
+212: farm: {
+213: title: "Farm Setup", sub: "Tell us about your farm", saved: "Farm created successfully.", button: "Save",
+215: { name: "name", label: "Farm name", type: "text", placeholder: "Enter name", required: true, max: 100 },
+216: { name: "location", label: "Farm location", type: "text", placeholder: "Enter location" },
+219: { name: "contact_info", label: "Farm contact", type: "text", placeholder: "Enter contact", phone: true },
+227: title: "Flock Records", sub: "Add a new flock to your farm", saved: "Flock record saved.",
+276: title: "Purchase Records", sub: "Record goods bought for the farm", saved: "Purchase record saved.",
+297: title: "Expenses Records", sub: "Record a farm expense", saved: "Expense record saved.",
+312: title: "Farm Activities", sub: "Track daily farm operations, treatments, and losses.", saved: "Activity saved.",
+392: const TABS = [["flock", "Flock"], ["production", "Production"], ["sales", "Sales"], ["purchase", "Purchase"], ["expense", "Expense"], ["activity", "Farm activities"]];
+535: // Role comes from the farm membership. ?role=staff previews a limited user.
+536: const userRole = () => String(params.get("role") || (farm() && farm().role) || "OWNER").toUpperCase();
+539: function noFarmView() {
+540: return `<div class="state-card">${icon("inbox", 28)}<h2>No farms yet</h2><p>Create your first farm</p><button class="btn" data-action="create-farm">${icon("plus", 14)}Create Farm</button></div>`;
+561: default: return { ic: "records", t: `${r.type} recorded`, s: r.details || (r.flock ? flockName(r.flock) : "Farm activity") };
+579: <div><h1>${greet}!</h1><p>Here's what's happening at ${esc(farm().name)} today.</p></div>
+661: const f = farm();
+662: // No farm yet: no search bar and no green farm button, only the "No farms yet" box in the page.
+663: $(".farm-wrap").hidden = !f;
+665: document.body.classList.toggle("no-farm", !f);
+666: const btn = $("#farm-btn");
+668: btn.setAttribute("data-menu", "farm-menu");
+671: $("#farm-menu").innerHTML = state.farms.map((f) =>
+672: `<button data-action="switch-farm" data-id="${esc(f.id)}"><span>${esc(f.name)}</span>${f.id === state.farmId ? icon("check", 16) : ""}</button>`).join("");
+695: if (!state.farms.length) { view.innerHTML = noFarmView(); return; }
+714: await api.loadFarms();
+715: if (state.farms.length) {
+716: if (!state.farms.some((f) => f.id === state.farmId)) state.farmId = state.farms[0].id;
+719: state.farmId = null; state.data = emptyData();
+764: // A schema with tabs (Farm Activities) is merged with the selected tab's fields and rules.
+938: if (type === "farm") {
+939: const f = await api.createFarm(clean);
+940: state.farmId = f.id; state.data = emptyData();
+942: boot(); // reload the shell and open the new farm's dashboard
+983: a.download = `${farm().name.toLowerCase().replace(/\s+/g, "-")}-${name}-${localISO(new Date())}.csv`;
+1033: case "create-farm": openModal("farm", act); break;
+1040: case "switch-farm":
+1042: if (act.dataset.id !== state.farmId) { state.farmId = act.dataset.id; boot(); }

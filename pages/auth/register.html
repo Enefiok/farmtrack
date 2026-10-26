@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign up | AgroFlow</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../../css/pages/register.css">
+</head>
+<body>
+  <main class="page">
+    <section class="hero" aria-label="AgroFlow introduction">
+      <h1>AgroFlow</h1>
+      <h2>Join Our Farming Community</h2>
+      <p>Create your account to manage farm records, track production,<br class="br-desktop"> and monitor inventory in one place.</p>
+    </section>
+
+    <section class="panel">
+      <div class="card">
+        <h3>Sign up</h3>
+        <p class="sub">Create your account</p>
+
+        <form id="signup-form" novalidate>
+          <div class="field" data-field="full_name">
+            <label for="full_name">Full Name</label>
+            <div class="control">
+              <input id="full_name" name="full_name" type="text" placeholder="John Doe"
+                     autocomplete="name" aria-describedby="full_name-error">
+            </div>
+            <p class="error" id="full_name-error" role="alert"></p>
+          </div>
+
+          <div class="field" data-field="email">
+            <label for="email">Email</label>
+            <div class="control">
+              <input id="email" name="email" type="email" placeholder="Enter email"
+                     autocomplete="email" inputmode="email" aria-describedby="email-error">
+            </div>
+            <p class="error" id="email-error" role="alert"></p>
+          </div>
+
+          <div class="field" data-field="password">
+            <label for="password">Password</label>
+            <div class="control has-toggle">
+              <input id="password" name="password" type="password" placeholder="Enter password"
+                     autocomplete="new-password" aria-describedby="password-error">
+              <button type="button" class="toggle" data-target="password" aria-label="Show password">Show</button>
+            </div>
+            <p class="error" id="password-error" role="alert"></p>
+          </div>
+
+          <div class="field" data-field="confirm_password">
+            <label for="confirm_password">Confirm Password</label>
+            <div class="control has-toggle">
+              <input id="confirm_password" name="confirm_password" type="password" placeholder="Enter password"
+                     autocomplete="new-password" aria-describedby="confirm_password-error">
+              <button type="button" class="toggle" data-target="confirm_password" aria-label="Show password">Show</button>
+            </div>
+            <p class="error" id="confirm_password-error" role="alert"></p>
+          </div>
+
+          <div class="terms" data-field="terms">
+            <input id="terms" name="terms" type="checkbox" aria-describedby="terms-error">
+            <label for="terms">I agree to the <a href="/terms" target="_blank" rel="noopener">Terms &amp; Conditions</a>
+              and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a></label>
+          </div>
+          <p class="error" id="terms-error" role="alert"></p>
+
+          <p class="form-error" id="form-error" role="alert"></p>
+
+          <button class="submit" id="submit" type="submit">Create Account</button>
+        </form>
+
+        <p class="alt">Already have an account? <a href="login.html">Sign in</a></p>
+        <p class="alt" id="mock-note" hidden style="color:var(--muted);font-size:11px">Demo mode: accounts are stored only in this browser.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="../../js/core/api.js"></script>
+  <script src="../../js/pages/register.js"></script>
+</body>
+</html>

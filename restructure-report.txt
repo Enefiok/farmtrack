@@ -1,0 +1,50 @@
+﻿=== NEW TREE ===
+      0 KB  assets\fonts\.gitkeep
+      0 KB  assets\icons\.gitkeep
+  465.4 KB  assets\images\farm_track_pic.jpg
+      0 KB  css\base\.gitkeep
+      0 KB  css\components\.gitkeep
+      0 KB  css\layout\.gitkeep
+   18.8 KB  css\pages\app.css
+    5.3 KB  css\pages\login.css
+    6.1 KB  css\pages\register.css
+      0 KB  js\components\.gitkeep
+   16.6 KB  js\core\api.js
+   66.5 KB  js\pages\app.js
+    3.3 KB  js\pages\login.js
+    4.4 KB  js\pages\register.js
+      0 KB  js\utils\.gitkeep
+    1.9 KB  pages\app.html
+    2.5 KB  pages\auth\login.html
+    3.9 KB  pages\auth\register.html
+      0 KB  pages\farm\.gitkeep
+      0 KB  pages\records\.gitkeep
+      0 KB  pages\setup\.gitkeep
+      0 KB  pages\users\.gitkeep
+      0 KB  partials\.gitkeep
+
+=== OLD PATHS STILL REFERENCED (need fixing) ===
+js\core\api.js:L2: agroflow-api.js
+js\core\api.js:L3: One place that talks to the Django API. signup.html, signin.html and
+js\core\api.js:L4: agroflow-app.html all load this file, so keep them in the same folder.
+
+=== VIEWS INSIDE app.js (for step 2) ===
+L556: case "production": return { ic: "egg", t: "Egg production recorded", s: `${fmtInt(r.collected)} eggs • ${flockName(r.flock)}` };
+L557: case "sales": return { ic: "wallet", t: "Sale recorded", s: `${unitQty(r)} ${r.product} • ${r.customer}` };
+L558: case "purchase": return { ic: "wallet", t: "Purchase recorded", s: `${unitQty(r)} ${r.item} • ${r.supplier}` };
+L559: case "flock": return { ic: "bird", t: "Flock added", s: `${fmtInt(r.starting_count)} birds • ${r.identifier}` };
+L560: case "expense": return { ic: "wallet", t: "Expense recorded", s: `${r.supplier || r.description} • ${fmtMoney0(r.amount)}` };
+L660: function renderShell() {
+L680: function renderNav() {
+L686: function renderView() {
+L1032: case "add-record": openModal(act.dataset.type, act); break;
+L1033: case "create-farm": openModal("farm", act); break;
+L1034: case "go-dashboard": location.hash = "#/dashboard"; break;
+L1035: case "retry": boot(); break;
+L1036: case "export-records": exportRecords(act.dataset.type); break;
+L1037: case "export-dashboard": exportDashboard(); break;
+L1038: case "review-flock": location.hash = "#/records/flock"; break;
+L1039: case "view-all": location.hash = "#/records/production"; break;
+L1040: case "switch-farm":
+L1044: case "signout":
+L1101: window.addEventListener("hashchange", () => { state.query = ""; const s = $("#search"); if (s) s.value = ""; renderView(); window.scrollTo(0, 0); });

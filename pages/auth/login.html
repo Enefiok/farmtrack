@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in | AgroFlow</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../../css/pages/login.css">
+</head>
+<body>
+  <main class="page">
+    <section class="hero" aria-label="AgroFlow introduction">
+      <h1>AgroFlow</h1>
+      <h2>Join Our Farming Community</h2>
+      <p>Create your account to manage farm records, track production,<br class="br-desktop"> and monitor inventory in one place.</p>
+    </section>
+
+    <section class="panel">
+      <div class="card">
+        <h3>Sign in</h3>
+        <p class="sub">Sign in to your account</p>
+
+        <form id="signin-form" novalidate>
+          <div class="field" data-field="email">
+            <label for="email">Email</label>
+            <div class="control">
+              <input id="email" name="email" type="email" placeholder="Enter email"
+                     autocomplete="username" inputmode="email" aria-describedby="email-error">
+            </div>
+            <p class="error" id="email-error" role="alert"></p>
+          </div>
+
+          <div class="field" data-field="password">
+            <label for="password">Password</label>
+            <div class="control has-toggle">
+              <input id="password" name="password" type="password" placeholder="Enter password"
+                     autocomplete="current-password" aria-describedby="password-error">
+              <button type="button" class="toggle" id="toggle-password" aria-label="Show password">Show</button>
+            </div>
+            <p class="error" id="password-error" role="alert"></p>
+          </div>
+
+          <p class="form-error" id="form-error" role="alert"></p>
+
+          <button class="submit" id="submit" type="submit">Sign in</button>
+        </form>
+
+        <p class="alt">Forgot Password? <a href="forgot-password.html">Reset</a></p>
+        <p class="alt" id="mock-note" hidden style="color:var(--muted);font-size:11px">Demo mode: accounts are stored only in this browser.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="../../js/core/api.js"></script>
+  <script src="../../js/pages/login.js"></script>
+</body>
+</html>
