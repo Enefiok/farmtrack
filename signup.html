@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign up | AgroFlow</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green-700: #147a3a;
+      --green-800: #0f6130;
+      --green-link: #147a3a;
+      --text: #111111;
+      --muted: #8a8a8a;
+      --label: #1c1c1c;
+      --field-bg: #f7f7f7;
+      --field-border: #ececec;
+      --card-border: #e8e8e8;
+      --error: #c62828;
+      --page-bg: #ffffff;
+      --card-bg: #ffffff;
+
+      /* Replace with your own image: url("images/farm.jpg") */
+      --hero-image: url("src/images/farm_track_pic.jpg");
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --text: #f2f2f2;
+        --muted: #9a9a9a;
+        --label: #e6e6e6;
+        --field-bg: #1e1e1e;
+        --field-border: #2c2c2c;
+        --card-border: #2c2c2c;
+        --page-bg: #121212;
+        --card-bg: #181818;
+        --green-link: #4cc17a;
+        --error: #ef7d7d;
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { height: 100%; margin: 0; }
+
+    body {
+      font-family: "Roboto", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+      color: var(--text);
+      background: var(--page-bg);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---------- Layout: phone first ---------- */
+    .page { min-height: 100%; display: flex; flex-direction: column; }
+
+    .hero {
+      position: relative;
+      display: none; /* hidden below 900px */
+      flex-direction: column;
+      justify-content: flex-end;
+      padding: 28px 24px;
+      color: #fff;
+      background:
+        linear-gradient(rgba(20, 110, 55, 0.55), rgba(20, 110, 55, 0.55)),
+        var(--hero-image),
+        linear-gradient(180deg, #5f9f7b 0%, #3f8a55 45%, #1f6b34 100%);
+      background-size: cover;
+      background-position: center;
+    }
+    .hero h1 { margin: 0 0 4px; font-size: 28px; font-weight: 500; }
+    .hero h2 { margin: 0 0 12px; font-size: 18px; font-weight: 500; }
+    .hero p  { margin: 0; font-size: 14px; line-height: 1.45; opacity: .95; }
+    .hero .br-desktop { display: none; }
+
+    .panel {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px 40px;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 28px 24px 24px;
+    }
+
+    @media (min-width: 900px) {
+      .page { flex-direction: row; }
+      .hero { display: flex; flex: 0 0 48%; padding: 0 32px; justify-content: center; }
+      .hero h1 { font-size: clamp(26px, 2.5vw, 40px); }
+      .hero h2 { font-size: clamp(16px, 1.8vw, 28px); }
+      .hero p { font-size: clamp(12px, 1.2vw, 18px); font-weight: 400; }
+      .hero .br-desktop { display: inline; }
+      .panel { flex: 1; padding: 40px; }
+    }
+
+    /* ---------- Form ---------- */
+    .card h3 { margin: 0; font-size: 18px; font-weight: 500; }
+    .card .sub { margin: 6px 0 24px; font-size: 12px; color: var(--muted); }
+
+    .field { margin-bottom: 18px; }
+    .field label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 500; color: var(--label); }
+
+    .control { position: relative; }
+    .control input {
+      width: 100%;
+      height: 44px;
+      padding: 0 16px;
+      font: inherit;
+      font-size: 16px; /* 16px stops iOS Safari from zooming in on focus */
+      color: var(--text);
+      background: var(--field-bg);
+      border: 1px solid var(--field-border);
+      border-radius: 14px;
+      outline: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .control input::placeholder { color: #a8a8a8; font-size: 12px; }
+    .control input:focus-visible {
+      border-color: var(--green-700);
+      box-shadow: 0 0 0 3px rgba(20, 122, 58, .18);
+    }
+    .control.has-toggle input { padding-right: 56px; }
+
+    .toggle {
+      position: absolute;
+      top: 50%; right: 8px;
+      transform: translateY(-50%);
+      padding: 6px 8px;
+      font: inherit; font-size: 12px;
+      color: var(--green-link);
+      background: none; border: 0; border-radius: 8px;
+      cursor: pointer;
+    }
+    .toggle:focus-visible { outline: 2px solid var(--green-700); }
+
+    .field.invalid input { border-color: var(--error); }
+    .error { margin: 6px 2px 0; font-size: 12px; color: var(--error); min-height: 0; }
+    .error:empty { display: none; }
+
+    .terms { display: flex; align-items: flex-start; gap: 10px; margin: 22px 0 4px; font-size: 11px; }
+    .terms input {
+      appearance: none; -webkit-appearance: none;
+      flex: none; width: 18px; height: 18px; margin: 0;
+      border: 1.5px solid var(--green-700); border-radius: 50%;
+      background: transparent; cursor: pointer; position: relative;
+    }
+    .terms input:checked { background: var(--green-700); }
+    .terms input:checked::after {
+      content: ""; position: absolute; left: 5px; top: 2px;
+      width: 4px; height: 8px;
+      border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+    }
+    .terms input:focus-visible { outline: 2px solid var(--green-700); outline-offset: 2px; }
+    .terms label { padding-top: 2px; line-height: 1.4; }
+    .terms.invalid input { border-color: var(--error); }
+
+    a { color: var(--green-link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .form-error {
+      margin: 14px 0 0; padding: 10px 12px; font-size: 12px; color: var(--error);
+      border: 1px solid var(--error); border-radius: 10px;
+    }
+    .form-error:empty { display: none; }
+
+    .submit {
+      width: 100%; height: 44px; margin-top: 18px;
+      font: inherit; font-size: 12px; font-weight: 500; color: #fff;
+      background: var(--green-700);
+      border: 0; border-radius: 10px; cursor: pointer;
+      transition: background .15s, opacity .15s;
+    }
+    .submit:hover { background: var(--green-800); }
+    .submit:focus-visible { outline: 3px solid rgba(20,122,58,.35); outline-offset: 2px; }
+    .submit:disabled { opacity: .65; cursor: not-allowed; }
+
+    .alt { margin: 18px 0 0; text-align: center; font-size: 12px; }
+
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero" aria-label="AgroFlow introduction">
+      <h1>AgroFlow</h1>
+      <h2>Join Our Farming Community</h2>
+      <p>Create your account to manage farm records, track production,<br class="br-desktop"> and monitor inventory in one place.</p>
+    </section>
+
+    <section class="panel">
+      <div class="card">
+        <h3>Sign up</h3>
+        <p class="sub">Create your account</p>
+
+        <form id="signup-form" novalidate>
+          <div class="field" data-field="full_name">
+            <label for="full_name">Full Name</label>
+            <div class="control">
+              <input id="full_name" name="full_name" type="text" placeholder="John Doe"
+                     autocomplete="name" aria-describedby="full_name-error">
+            </div>
+            <p class="error" id="full_name-error" role="alert"></p>
+          </div>
+
+          <div class="field" data-field="email">
+            <label for="email">Email</label>
+            <div class="control">
+              <input id="email" name="email" type="email" placeholder="Enter email"
+                     autocomplete="email" inputmode="email" aria-describedby="email-error">
+            </div>
+            <p class="error" id="email-error" role="alert"></p>
+          </div>
+
+          <div class="field" data-field="password">
+            <label for="password">Password</label>
+            <div class="control has-toggle">
+              <input id="password" name="password" type="password" placeholder="Enter password"
+                     autocomplete="new-password" aria-describedby="password-error">
+              <button type="button" class="toggle" data-target="password" aria-label="Show password">Show</button>
+            </div>
+            <p class="error" id="password-error" role="alert"></p>
+          </div>
+
+          <div class="field" data-field="confirm_password">
+            <label for="confirm_password">Confirm Password</label>
+            <div class="control has-toggle">
+              <input id="confirm_password" name="confirm_password" type="password" placeholder="Enter password"
+                     autocomplete="new-password" aria-describedby="confirm_password-error">
+              <button type="button" class="toggle" data-target="confirm_password" aria-label="Show password">Show</button>
+            </div>
+            <p class="error" id="confirm_password-error" role="alert"></p>
+          </div>
+
+          <div class="terms" data-field="terms">
+            <input id="terms" name="terms" type="checkbox" aria-describedby="terms-error">
+            <label for="terms">I agree to the <a href="/terms" target="_blank" rel="noopener">Terms &amp; Conditions</a>
+              and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a></label>
+          </div>
+          <p class="error" id="terms-error" role="alert"></p>
+
+          <p class="form-error" id="form-error" role="alert"></p>
+
+          <button class="submit" id="submit" type="submit">Create Account</button>
+        </form>
+
+        <p class="alt">Already have an account? <a href="signin.html">Sign in</a></p>
+        <p class="alt" id="mock-note" hidden style="color:var(--muted);font-size:11px">Demo mode: accounts are stored only in this browser.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="agroflow-api.js"></script>
+  <script>
+    const form = document.getElementById("signup-form");
+    const submitBtn = document.getElementById("submit");
+    const formError = document.getElementById("form-error");
+    const fields = ["full_name", "email", "password", "confirm_password", "terms"];
+    let redirecting = false;
+
+    if (AgroAPI.mock) document.getElementById("mock-note").hidden = false;
+
+    // Already signed in? Skip straight to the app.
+    AgroAPI.me().then(() => { redirecting = true; location.replace(AgroAPI.pages.app); }).catch(() => {});
+
+    // ---- Show / hide password ----
+    document.querySelectorAll(".toggle").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const input = document.getElementById(btn.dataset.target);
+        const showing = input.type === "text";
+        input.type = showing ? "password" : "text";
+        btn.textContent = showing ? "Show" : "Hide";
+        btn.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+      });
+    });
+
+    // ---- Helpers ----
+    function setError(name, message) {
+      const el = document.getElementById(name + "-error");
+      const wrapper = document.querySelector(`[data-field="${name}"]`);
+      if (el) el.textContent = message || "";
+      if (wrapper) wrapper.classList.toggle("invalid", Boolean(message));
+      const input = document.getElementById(name);
+      if (input) input.setAttribute("aria-invalid", message ? "true" : "false");
+    }
+    function clearErrors() { fields.forEach((f) => setError(f, "")); formError.textContent = ""; }
+
+    // Format-level checks only. Duplicate email and password strength are decided by the server.
+    function validate(values) {
+      const errors = {};
+      if (!values.full_name.trim()) errors.full_name = "Enter your full name.";
+      if (!values.email.trim()) errors.email = "Enter your email address.";
+      else if (!/^\S+@\S+\.\S+$/.test(values.email.trim())) errors.email = "Enter a valid email address.";
+      if (!values.password) errors.password = "Enter a password.";
+      else if (values.password.length < 8) errors.password = "Password must be at least 8 characters.";
+      if (!values.confirm_password) errors.confirm_password = "Confirm your password.";
+      else if (values.password !== values.confirm_password) errors.confirm_password = "Passwords do not match.";
+      if (!values.terms) errors.terms = "You must agree to the Terms & Conditions and Privacy Policy.";
+      return errors;
+    }
+
+    // ---- Submit ----
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (submitBtn.disabled) return; // blocks double taps
+      clearErrors();
+
+      const values = {
+        full_name: form.full_name.value,
+        email: form.email.value,
+        password: form.password.value,
+        confirm_password: form.confirm_password.value,
+        terms: form.terms.checked,
+      };
+
+      const errors = validate(values);
+      const firstInvalid = fields.find((f) => errors[f]);
+      if (firstInvalid) {
+        fields.forEach((f) => setError(f, errors[f] || ""));
+        document.getElementById(firstInvalid).focus();
+        return; // typed values are kept
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Creating account...";
+
+      try {
+        await AgroAPI.register({
+          full_name: values.full_name.trim(),
+          email: values.email.trim().toLowerCase(),
+          password: values.password,
+          password2: values.confirm_password,
+        });
+        redirecting = true;
+        location.assign(AgroAPI.pages.app); // the app shows "No farms yet" for a new account
+      } catch (err) {
+        const fe = (err && err.fields) || {};
+        let shown = false;
+        fields.forEach((f) => { if (fe[f]) { setError(f, fe[f]); shown = true; } });
+        if (shown) { const first = fields.find((f) => fe[f]); if (first) document.getElementById(first).focus(); }
+        else formError.textContent = (err && err.message) || "We could not create your account. Please try again.";
+      } finally {
+        if (!redirecting) { submitBtn.disabled = false; submitBtn.textContent = "Create Account"; }
+      }
+    });
+
+    // Clear a field's error as soon as the user edits it
+    fields.forEach((f) => {
+      const el = document.getElementById(f);
+      el.addEventListener(el.type === "checkbox" ? "change" : "input", () => setError(f, ""));
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in | AgroFlow</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green-700: #147a3a;
+      --green-800: #0f6130;
+      --green-link: #147a3a;
+      --text: #111111;
+      --muted: #8a8a8a;
+      --label: #1c1c1c;
+      --field-bg: #f7f7f7;
+      --field-border: #ececec;
+      --card-border: #e8e8e8;
+      --error: #c62828;
+      --page-bg: #ffffff;
+      --card-bg: #ffffff;
+
+      /* Replace with your own image: url("images/farm.jpg") */
+      --hero-image: url("src/images/farm_track_pic.jpg");
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --text: #f2f2f2;
+        --muted: #9a9a9a;
+        --label: #e6e6e6;
+        --field-bg: #1e1e1e;
+        --field-border: #2c2c2c;
+        --card-border: #2c2c2c;
+        --page-bg: #121212;
+        --card-bg: #181818;
+        --green-link: #4cc17a;
+        --error: #ef7d7d;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+
+    body {
+      font-family: "Roboto", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+      color: var(--text);
+      background: var(--page-bg);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---------- Layout: phone first ---------- */
+    .page { min-height: 100%; display: flex; flex-direction: column; }
+
+    .hero {
+      position: relative;
+      display: none; /* hidden below 900px */
+      flex-direction: column;
+      justify-content: flex-end;
+      padding: 28px 24px;
+      color: #fff;
+      background:
+        linear-gradient(rgba(20, 110, 55, 0.55), rgba(20, 110, 55, 0.55)),
+        var(--hero-image),
+        linear-gradient(180deg, #5f9f7b 0%, #3f8a55 45%, #1f6b34 100%);
+      background-size: cover;
+      background-position: center;
+    }
+    .hero h1 { margin: 0 0 4px; font-size: 28px; font-weight: 500; }
+    .hero h2 { margin: 0 0 12px; font-size: 18px; font-weight: 500; }
+    .hero p  { margin: 0; font-size: 14px; line-height: 1.45; opacity: .95; }
+    .hero .br-desktop { display: none; }
+
+    .panel {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px 40px;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 28px 24px 24px;
+    }
+
+    @media (min-width: 900px) {
+      .page { flex-direction: row; }
+      .hero { display: flex; flex: 0 0 48%; padding: 0 32px; justify-content: center; }
+      .hero h1 { font-size: clamp(26px, 2.5vw, 40px); }
+      .hero h2 { font-size: clamp(16px, 1.8vw, 28px); }
+      .hero p { font-size: clamp(12px, 1.2vw, 18px); font-weight: 400; }
+      .hero .br-desktop { display: inline; }
+      .panel { flex: 1; padding: 40px; }
+    }
+
+    /* ---------- Form ---------- */
+    .card h3 { margin: 0; font-size: 18px; font-weight: 500; }
+    .card .sub { margin: 6px 0 24px; font-size: 12px; color: var(--muted); }
+
+    .field { margin-bottom: 18px; }
+    .field label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 500; color: var(--label); }
+
+    .control { position: relative; }
+    .control input {
+      width: 100%;
+      height: 44px;
+      padding: 0 16px;
+      font: inherit;
+      font-size: 16px; /* 16px stops iOS Safari from zooming in on focus */
+      color: var(--text);
+      background: var(--field-bg);
+      border: 1px solid var(--field-border);
+      border-radius: 14px;
+      outline: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .control input::placeholder { color: #a8a8a8; font-size: 12px; }
+    .control input:focus-visible {
+      border-color: var(--green-700);
+      box-shadow: 0 0 0 3px rgba(20, 122, 58, .18);
+    }
+    .control.has-toggle input { padding-right: 56px; }
+
+    .toggle {
+      position: absolute;
+      top: 50%; right: 8px;
+      transform: translateY(-50%);
+      padding: 6px 8px;
+      font: inherit; font-size: 12px;
+      color: var(--green-link);
+      background: none; border: 0; border-radius: 8px;
+      cursor: pointer;
+    }
+    .toggle:focus-visible { outline: 2px solid var(--green-700); }
+
+    .field.invalid input { border-color: var(--error); }
+    .error { margin: 6px 2px 0; font-size: 12px; color: var(--error); }
+    .error:empty { display: none; }
+
+    a { color: var(--green-link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .form-error {
+      margin: 6px 0 0; padding: 10px 12px; font-size: 12px; color: var(--error);
+      border: 1px solid var(--error); border-radius: 10px;
+    }
+    .form-error:empty { display: none; }
+
+    .submit {
+      display: block;
+      width: calc(100% - 28px);
+      height: 40px;
+      margin: 36px auto 0;
+      font: inherit; font-size: 12px; font-weight: 500; color: #fff;
+      background: var(--green-700);
+      border: 0; border-radius: 8px; cursor: pointer;
+      transition: background .15s, opacity .15s;
+    }
+    .submit:hover { background: var(--green-800); }
+    .submit:focus-visible { outline: 3px solid rgba(20,122,58,.35); outline-offset: 2px; }
+    .submit:disabled { opacity: .65; cursor: not-allowed; }
+
+    .alt { margin: 14px 0 0; text-align: center; font-size: 11px; }
+
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero" aria-label="AgroFlow introduction">
+      <h1>AgroFlow</h1>
+      <h2>Join Our Farming Community</h2>
+      <p>Create your account to manage farm records, track production,<br class="br-desktop"> and monitor inventory in one place.</p>
+    </section>
+
+    <section class="panel">
+      <div class="card">
+        <h3>Sign in</h3>
+        <p class="sub">Sign in to your account</p>
+
+        <form id="signin-form" novalidate>
+          <div class="field" data-field="email">
+            <label for="email">Email</label>
+            <div class="control">
+              <input id="email" name="email" type="email" placeholder="Enter email"
+                     autocomplete="username" inputmode="email" aria-describedby="email-error">
+            </div>
+            <p class="error" id="email-error" role="alert"></p>
+          </div>
+
+          <div class="field" data-field="password">
+            <label for="password">Password</label>
+            <div class="control has-toggle">
+              <input id="password" name="password" type="password" placeholder="Enter password"
+                     autocomplete="current-password" aria-describedby="password-error">
+              <button type="button" class="toggle" id="toggle-password" aria-label="Show password">Show</button>
+            </div>
+            <p class="error" id="password-error" role="alert"></p>
+          </div>
+
+          <p class="form-error" id="form-error" role="alert"></p>
+
+          <button class="submit" id="submit" type="submit">Sign in</button>
+        </form>
+
+        <p class="alt">Forgot Password? <a href="forgot-password.html">Reset</a></p>
+        <p class="alt" id="mock-note" hidden style="color:var(--muted);font-size:11px">Demo mode: accounts are stored only in this browser.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="agroflow-api.js"></script>
+  <script>
+    const form = document.getElementById("signin-form");
+    const submitBtn = document.getElementById("submit");
+    const formError = document.getElementById("form-error");
+    const fields = ["email", "password"];
+    let redirecting = false;
+
+    if (AgroAPI.mock) document.getElementById("mock-note").hidden = false;
+
+    // Already signed in? Skip straight to the app.
+    AgroAPI.me().then(() => { redirecting = true; location.replace(AgroAPI.pages.app); }).catch(() => {});
+
+    // ---- Show / hide password ----
+    const toggle = document.getElementById("toggle-password");
+    toggle.addEventListener("click", () => {
+      const input = document.getElementById("password");
+      const showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      toggle.textContent = showing ? "Show" : "Hide";
+      toggle.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+    });
+
+    // ---- Helpers ----
+    function setError(name, message) {
+      const el = document.getElementById(name + "-error");
+      const wrapper = document.querySelector(`[data-field="${name}"]`);
+      if (el) el.textContent = message || "";
+      if (wrapper) wrapper.classList.toggle("invalid", Boolean(message));
+      document.getElementById(name).setAttribute("aria-invalid", message ? "true" : "false");
+    }
+    function clearErrors() { fields.forEach((f) => setError(f, "")); formError.textContent = ""; }
+
+    // ---- Submit ----
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (submitBtn.disabled) return; // blocks double taps
+      clearErrors();
+
+      const email = form.email.value.trim();
+      const password = form.password.value;
+
+      let invalid = null;
+      if (!email) { setError("email", "Enter your email address."); invalid = invalid || "email"; }
+      else if (!/^\S+@\S+\.\S+$/.test(email)) { setError("email", "Enter a valid email address."); invalid = invalid || "email"; }
+      if (!password) { setError("password", "Enter your password."); invalid = invalid || "password"; }
+      if (invalid) { document.getElementById(invalid).focus(); return; } // typed values are kept
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Signing in...";
+
+      try {
+        await AgroAPI.login({ email: email.toLowerCase(), password });
+        redirecting = true;
+        // The app decides what to show: "No farms yet", the dashboard, or the farm switcher.
+        location.assign(AgroAPI.pages.app);
+      } catch (err) {
+        const status = err && err.status;
+        if (status === 429) {
+          formError.textContent = "Too many attempts. Wait a few minutes and try again.";
+        } else if (status === 400 || status === 401) {
+          // One message for a wrong email or a wrong password, so we never reveal which accounts exist
+          formError.textContent = "Email or password is incorrect.";
+        } else {
+          formError.textContent = (err && err.message) || "We could not sign you in. Please try again.";
+        }
+      } finally {
+        if (!redirecting) { submitBtn.disabled = false; submitBtn.textContent = "Sign in"; }
+      }
+    });
+
+    // Clear a field's error as soon as the user edits it
+    fields.forEach((f) => document.getElementById(f).addEventListener("input", () => setError(f, "")));
+  </script>
+</body>
+</html>
