@@ -210,8 +210,18 @@
     .act time { font-size: 10px; color: var(--muted); white-space: nowrap; }
     .empty-line { padding: 18px 0 6px; font-size: 12px; color: var(--muted); }
 
+    /* ---------- Setup card ("Add existing birds") ---------- */
+    .setup-card { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; background: var(--green-tint); border-color: var(--green-soft); }
+    .setup-ic { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 12px; background: var(--green-soft); color: var(--green); }
+    .setup-txt { flex: 1; min-width: 0; }
+    .setup-txt h3 { margin: 0 0 4px; font-size: 15px; font-weight: 500; }
+    .setup-txt p { margin: 0; font-size: 12px; color: var(--muted); }
+    .setup-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: flex-end; }
+    .setup-actions .link-btn { text-decoration: underline; color: var(--muted); }
+
     /* ---------- Records ---------- */
     .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+    .toolbar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .tabs { display: inline-flex; gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: 12px; overflow-x: auto; max-width: 100%; background: var(--card); }
     .tab { flex: none; padding: 9px 20px; border: 0; border-radius: 8px; background: none; font-size: 14px; white-space: nowrap; }
     .tab:hover { background: var(--green-tint); }
@@ -309,6 +319,17 @@
       .control input, .control select, .control textarea { font-size: 16px; }
       .toolbar { flex-direction: column; align-items: stretch; }
       .page-head h1 { font-size: 20px; }
+      .setup-card { flex-direction: column; align-items: flex-start; }
+      .setup-actions { justify-content: flex-start; }
     }
     @media (max-width: 640px) { body.no-farm .topbar .spacer { display: block; } }
     @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* Add these to the bottom of your stylesheet (multi-flock "Add existing birds" modal) */
+.flock-rows-wrap { grid-column: 1 / -1; display: grid; gap: 12px; }
+#flock-rows { display: grid; gap: 12px; }
+.flock-row { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 12px; }
+.flock-row-head { display: flex; justify-content: space-between; align-items: center; }
+.rows-total { margin: 0; font-size: 13px; opacity: .75; }
+/* with several rows the modal gets tall, so let it scroll */
+.modal { max-height: 90vh; overflow-y: auto; }

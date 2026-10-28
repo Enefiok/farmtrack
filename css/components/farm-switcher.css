@@ -1,0 +1,71 @@
+/* css/components/farm-switcher.css
+   Farm switcher dropdown + initials avatar.
+   Load AFTER ../css/pages/app.css so these rules win. */
+
+/* ---- Farm switcher ---- */
+#farm-menu { min-width: 220px; max-width: 280px; padding: 6px; }
+
+.menu .menu-label {
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.menu .menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.menu .menu-item:hover,
+.menu .menu-item:focus-visible { background: #f1f5f2; outline: none; }
+.menu .menu-item.on { background: #e8f3ec; }
+.menu .menu-item.on .i { color: #147a3a; flex: none; }
+
+.menu .mi-txt { display: flex; flex-direction: column; min-width: 0; }
+.menu .mi-txt b {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu .mi-txt small {
+  font-size: 12px;
+  color: #6b7280;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu .menu-sep { height: 1px; margin: 6px 4px; background: var(--line, #e5e7eb); }
+
+.menu .menu-add { justify-content: flex-start; color: #147a3a; font-weight: 600; }
+.menu .menu-add .i { flex: none; }
+
+/* ---- Avatar with initials ---- */
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #e3f1e8;
+  color: #147a3a;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}

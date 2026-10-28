@@ -28,6 +28,7 @@
       production: "/api/farms/{farm}/production/",
       items: "/api/farms/{farm}/items/",
       units: "/api/units/",
+      openingPosition: "/api/farms/{farm}/opening-position/",
     },
     DEFAULTS: { eggUnitId: 2, eggItemId: null },
   };
@@ -240,6 +241,55 @@
     return err && (err.status === 404 || err.status === 405); 
   };
 
+  // ---------- server data: pagination + number parsing ----------
+  const n = function (v) { const x = parseFloat(v); return Number.isFinite(x) ? x : 0; };
+
+  // DRF gives absolute "next" URLs; request() adds API_BASE itself, so keep only path + query.
+  const toPath = function (u) {
+    try { const x = new URL(u, CONFIG.API_BASE); return x.pathname + x.search; } catch { return null; }
+  };
+
+  async function listAll(path) {
+    let url = path, out = [], guard = 0;
+    while (url && guard++ < 200) {
+      const d = await request("GET", url);
+      if (Array.isArray(d)) return out.concat(d);
+      out = out.concat((d && d.results) || []);
+      url = d && d.next ? toPath(d.next) : null;
+    }
+    return out;
+  }
+
+  const ACTIVITY_LABELS = {
+    FEED_CONSUMPTION: "Feed consumption", MORTALITY: "Mortality", VACCINATION: "Vaccination",
+    MEDICATION: "Medication", FLOCK_CHANGE: "Flock change", LOSS: "Damage", OTHER: "Others"
+  };
+
+  const normFlock = function (f) {
+    return {
+      id: f.id, identifier: f.identifier, breed: f.breed || "",
+      arrival_date: f.arrival_date, age_at_arrival: f.age_at_arrival,
+      starting_count: n(f.initial_count), current_count: n(f.current_count),
+      mortality_rate: n(f.mortality_rate), stage: f.stage || "", status: f.status || "",
+      created_at: f.created_at, created_by: f.created_by_name || ""
+    };
+  };
+  const normProduction = function (p) {
+    return {
+      id: p.id, flock: p.flock, date: p.event_date,
+      collected: n(p.quantity_collected), damaged: n(p.quantity_damaged), saleable: n(p.quantity_saleable),
+      recorded_by: p.created_by_name || "", created_at: p.created_at, created_by: p.created_by_name || ""
+    };
+  };
+  const normActivity = function (a) {
+    return {
+      id: a.id, flock: a.flock || null, code: a.activity_type,
+      type: ACTIVITY_LABELS[a.activity_type] || a.activity_type,
+      date: a.event_date, details: a.notes || (a.quantity != null ? String(n(a.quantity)) : ""),
+      created_at: a.created_at, created_by: a.created_by_name || ""
+    };
+  };
+
   async function eggItemId(farmId) {
     if (CONFIG.DEFAULTS.eggItemId) return CONFIG.DEFAULTS.eggItemId;
     const cached = LS.get(K_EGG_ITEM + farmId, null);
@@ -438,6 +488,30 @@
       const d = await request("POST", farmUrl(key, farmId), body);
       const rec = (d && (d.flock || d.activity || d.production || d)) || {};
       return { id: rec.id };
+    },
+
+    // Loads every page of flocks, production and activities for a farm.
+    loadFarmData: async function (farmId) {
+      const r = await Promise.all([
+        listAll(farmUrl("flocks", farmId)),
+        listAll(farmUrl("production", farmId)),
+        listAll(farmUrl("activities", farmId)),
+      ]);
+      return {
+        flock: r[0].map(normFlock),
+        production: r[1].map(normProduction),
+        activity: r[2].map(normActivity),
+      };
+    },
+
+    // The backend creates the real Flock records for every flock line, atomically.
+    createOpeningPosition: async function (farmId, v) {
+      return request("POST", farmUrl("openingPosition", farmId), {
+        event_date: v.event_date,
+        status: "CONFIRMED",
+        flock_lines: v.flock_lines,
+        stock_lines: [],
+      });
     },
     
     createFarm: async function(v) {

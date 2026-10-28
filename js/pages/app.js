@@ -53,6 +53,12 @@
     if (v >= 1e3) return +(v / 1e3).toFixed(1) + "k";
     return String(v);
   };
+  // Initials for the profile circle: "Science_Prince" -> "SP", "Enefiok" -> "EN"
+  const initials = (s) => {
+    const parts = String(s || "").split("@")[0].split(/[\s._-]+/).filter(Boolean);
+    if (!parts.length) return "?";
+    return (parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : parts[0].slice(0, 2)).toUpperCase();
+  };
 
   /* =====================================================================
      ICONS
@@ -87,9 +93,10 @@
 
   /* =====================================================================
      STATE + DATA LAYER
-     The "api" object below is a stand-in for your Django API. It keeps
-     records in this browser's localStorage. Replace load() and create()
-     with fetch() calls when the backend endpoints exist.
+     Flocks, production and activities are loaded from the Django API.
+     Sales, purchase and expense have no endpoints yet, so they stay in
+     this browser's localStorage. In DEV mode (?demo=1 / ?dev=1) everything
+     is local.
      ===================================================================== */
   const TYPES = ["flock", "production", "sales", "purchase", "expense", "activity"];
   const emptyData = () => Object.fromEntries(TYPES.map((t) => [t, []]));
@@ -135,22 +142,28 @@
       return f;
     },
     async load() {
+      if (!DEV) {
+        // sales/purchase/expense have no endpoints yet, so they stay local
+        const saved = readStore() || {};
+        const server = await AgroAPI.loadFarmData(state.farmId);
+        state.data = { ...emptyData(), sales: saved.sales || [], purchase: saved.purchase || [], expense: saved.expense || [], ...server };
+        return;
+      }
       await delay(150);
       const saved = readStore();
       state.data = { ...emptyData(), ...(saved || {}) };
       if (!saved && params.has("demo")) { state.data = demoData(); state.settings.dailyEggTarget = 4500; }
     },
     async create(type, values) {
-      let serverId = null;
       if (!DEV && (type === "flock" || type === "activity" || type === "production")) {
-        // these three are saved on the server; the other record types have no endpoints yet
-        serverId = (await AgroAPI.createRecord(type, state.farmId, values)).id;
-      } else {
-        await delay(250);
+        await AgroAPI.createRecord(type, state.farmId, values);
+        await api.load(); // reloads flocks too, so a mortality updates current_count
+        return;
       }
-      const rec = { created_at: new Date().toISOString(), created_by: state.user.name, ...values, id: serverId != null ? serverId : uid() };
+      await delay(250);
+      const rec = { created_at: new Date().toISOString(), created_by: state.user.name, ...values, id: uid() };
       state.data[type].unshift(rec);
-      if (values.code === "MORTALITY") { // the server calculates counts; this mimics it
+      if (values.code === "MORTALITY") { // DEV only: the server calculates counts
         const fl = findFlock(values.flock);
         if (fl) {
           fl.current_count = Math.max(0, num(fl.current_count) - num(values.birds));
@@ -159,6 +172,31 @@
       }
       writeStore();
       return rec;
+    },
+    // "Add existing birds": POST /api/farms/{id}/opening-position/
+    // One request carries every flock row from the modal (flock_lines is a list).
+    // Each row has its own arrival date; the top-level "Date of Count" is the fallback.
+    async createOpening(v) {
+      if (!DEV) {
+        await AgroAPI.createOpeningPosition(state.farmId, {
+          event_date: v.date,
+          flock_lines: v.rows.map((r) => ({
+            identifier: r.identifier,
+            initial_count: r.count,
+            breed: r.breed,
+            stage: r.stage,
+            arrival_date: r.arrival_date || v.date, // Use individual date, fall back to the global date
+          })),
+        });
+        await api.load();
+        return;
+      }
+      await delay(250);
+      const at = new Date().toISOString();
+      v.rows.slice().reverse().forEach((r) => {
+        state.data.flock.unshift({ id: uid(), identifier: r.identifier, breed: r.breed, arrival_date: r.arrival_date || v.date, starting_count: r.count, current_count: r.count, mortality_rate: 0, stage: r.stage, status: "Active", created_at: at, created_by: state.user.name });
+      });
+      writeStore();
     },
   };
 
@@ -221,6 +259,21 @@
           options: [["Africa/Lagos", "Africa/Lagos (WAT)"], ["Africa/Accra", "Africa/Accra (GMT)"], ["Africa/Nairobi", "Africa/Nairobi (EAT)"], ["Africa/Johannesburg", "Africa/Johannesburg (SAST)"], ["Europe/London", "Europe/London"], ["America/New_York", "America/New_York"], ["UTC", "UTC"]] },
         { name: "unit_system", label: "Unit preference", type: "select", placeholder: "Enter unit", required: true, default: "metric",
           options: [["metric", "Metric (kg, litres)"], ["imperial", "Imperial (lb, gallons)"]] },
+      ],
+    },
+    opening: {
+      title: "Add existing birds", sub: "Enter every group of birds already on your farm so your numbers start correct.", saved: "Existing birds added.", button: "Save flocks",
+      // Shared by all flocks in this submission
+      fields: [
+        { name: "date", label: "Date of Count", type: "date", required: true },
+      ],
+      // One of these per flock row (built by mountRows, not by fieldHTML)
+      rowFields: [
+        { name: "identifier", label: "Flock Name", type: "text", placeholder: "Enter flock name", required: true },
+        { name: "breed", label: "Breed/Type", type: "select", placeholder: "Enter breed", required: true, options: list("Isa Brown", "Lohmann Brown", "Hy-Line", "Bovans", "Noiler", "Other") },
+        { name: "stage", label: "Production Stage", type: "select", placeholder: "Enter production stage", required: true, options: list("Chick", "Grower", "Pullet", "Layer", "Spent hen") },
+        { name: "count", label: "Number of birds", type: "number", placeholder: "Enter number of birds", required: true, min: 1, integer: true },
+        { name: "arrival_date", label: "Arrival Date", type: "date", placeholder: "When did you get this flock?", required: true },
       ],
     },
     flock: {
@@ -395,8 +448,9 @@
 
   /* =====================================================================
      DASHBOARD CALCULATIONS
-     These are front-end placeholders. The real numbers (stock, balances,
-     costing) must come from the backend per the requirements spec.
+     Live birds and eggs today come from the server data loaded above.
+     Stock value, sales and the chart are still front-end placeholders
+     until those endpoints exist.
      ===================================================================== */
   const sumBy = (arr, field, pred = () => true) => arr.filter(pred).reduce((s, r) => s + num(r[field]), 0);
   const pct = (cur, prev) => (prev > 0 ? ((cur - prev) / prev) * 100 : null);
@@ -565,6 +619,24 @@
       .sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 5);
   }
 
+  /* ---------- "Add existing birds" setup card ---------- */
+  const skipKey = () => `agroflow:v1:skip-opening:${state.farmId}`;
+  const openingSkipped = () => { try { return localStorage.getItem(skipKey()) === "1"; } catch { return false; } };
+  // Shown only while the farm has no flocks and the user hasn't skipped it.
+  // As soon as any flock exists it disappears by itself.
+  const showSetupCard = () => state.data.flock.length === 0 && !openingSkipped();
+
+  function setupCard() {
+    return `<section class="card setup-card">
+      <div class="setup-ic">${icon("bird", 22)}</div>
+      <div class="setup-txt"><h3>Already have birds on your farm?</h3><p>Add them now so your numbers start correct.</p></div>
+      <div class="setup-actions">
+        <button class="btn" data-action="add-existing">${icon("plus", 14)}Add existing birds</button>
+        <button class="link-btn" data-action="skip-opening">Skip, I'm starting fresh</button>
+      </div>
+    </section>`;
+  }
+
   function dashboardView() {
     const m = metrics();
     const h = new Date().getHours();
@@ -579,6 +651,8 @@
         <div><h1>${greet}!</h1><p>Here's what's happening at ${esc(farm().name)} today.</p></div>
         <button class="btn" data-action="export-dashboard">${icon("upload", 16)}Export</button>
       </div>
+
+      ${showSetupCard() ? setupCard() : ""}
 
       <div class="stats">
         ${statCard("bird", "Live birds", fmtInt(m.live), null)}
@@ -631,9 +705,11 @@
     const shown = q ? rows.filter((r) => cells(r).join(" ").toLowerCase().includes(q)) : rows;
     const label = TABS.find((t) => t[0] === type)[1];
 
+    // Permanent entry point for users who skipped the dashboard card
+    const addExisting = type === "flock" ? `<button class="btn ghost" data-action="add-existing">${icon("bird", 16)}Add existing flocks</button>` : "";
     const toolbar = `<div class="toolbar">
       <div class="tabs" role="tablist" aria-label="Record types">${TABS.map(([k, l]) => `<button class="tab" role="tab" aria-selected="${k === type}" data-tab="${k}">${l}</button>`).join("")}</div>
-      <button class="btn" data-action="export-records" data-type="${type}">${icon("upload", 16)}Export</button>
+      <div class="toolbar-actions">${addExisting}<button class="btn" data-action="export-records" data-type="${type}">${icon("upload", 16)}Export</button></div>
     </div>`;
 
     if (!rows.length) {
@@ -666,14 +742,20 @@
     const btn = $("#farm-btn");
     if (f) {
       btn.setAttribute("data-menu", "farm-menu");
-      btn.innerHTML = `<div><b>${esc(f.name)}</b>${f.location ? `<small>${esc(f.location)}</small>` : ""}</div>${icon("chevronRight", 16)}`;
+      btn.innerHTML = `<div><b>${esc(f.name)}</b>${f.location ? `<small>${esc(f.location)}</small>` : ""}</div>${icon("chevronDown", 16)}`;
     }
-    $("#farm-menu").innerHTML = state.farms.map((f) =>
-      `<button data-action="switch-farm" data-id="${esc(f.id)}"><span>${esc(f.name)}</span>${f.id === state.farmId ? icon("check", 16) : ""}</button>`).join("");
+    // Farm switcher: every farm the user belongs to, plus "Add new farm"
+    $("#farm-menu").innerHTML =
+      `<div class="menu-label">Your farms</div>` +
+      state.farms.map((x) => {
+        const on = x.id === state.farmId;
+        return `<button class="menu-item${on ? " on" : ""}" data-action="switch-farm" data-id="${esc(x.id)}" role="menuitemradio" aria-checked="${on}"><span class="mi-txt"><b>${esc(x.name)}</b>${x.location ? `<small>${esc(x.location)}</small>` : ""}</span>${on ? icon("check", 16) : ""}</button>`;
+      }).join("") +
+      `<div class="menu-sep"></div><button class="menu-item menu-add" data-action="create-farm">${icon("plus", 16)}<span>Add new farm</span></button>`;
     $("#menu-btn").innerHTML = icon("menu", 20);
     $("#search-box").innerHTML = `${icon("search", 18)}<input id="search" type="search" placeholder="Search" aria-label="Search" autocomplete="off">`;
     $("#bell-btn").innerHTML = icon("bell", 18);
-    $("#user-btn").innerHTML = `<span class="avatar"></span><div><b>${esc(state.user.name)}</b><small>${esc(state.user.email)}</small></div>${icon("chevronDown", 18)}`;
+    $("#user-btn").innerHTML = `<span class="avatar" aria-hidden="true">${esc(initials(state.user.name))}</span><div><b>${esc(state.user.name)}</b><small>${esc(state.user.email)}</small></div>${icon("chevronDown", 18)}`;
     $("#user-menu").innerHTML = `<div class="head"><b>${esc(state.user.name)}</b><span>${esc(state.user.email)}</span></div><button data-action="signout">Sign out ${icon("logout", 16)}</button>`;
   }
 
@@ -764,6 +846,94 @@
   // A schema with tabs (Farm Activities) is merged with the selected tab's fields and rules.
   const effective = (base, key) => (base.tabs ? { ...base, ...(base.tabs.find((t) => t.key === key) || base.tabs[0]) } : base);
 
+  /* ---------- Multi-row flock entry (Add existing birds) ---------- */
+  let rowSeq = 0;
+
+  function rowHTML(rf) {
+    const k = ++rowSeq;
+    const cells = rf.map((f) => {
+      const id = `r${k}-${f.name}`;
+      let ctl;
+      if (f.type === "select") {
+        ctl = `<div class="control select"><select id="${id}" data-f="${f.name}"><option value="" selected disabled hidden>${esc(f.placeholder)}</option>${f.options.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select>${icon("chevronDown", 18)}</div>`;
+      } else if (f.type === "date") {
+        // Same look as the other date fields; starts empty because existing flocks arrived in the past
+        ctl = `<div class="control date"><input id="${id}" data-f="${f.name}" type="date" max="${localISO(new Date())}">${icon("calendar", 18)}</div>`;
+      } else {
+        ctl = `<div class="control"><input id="${id}" data-f="${f.name}" type="${f.type}" ${f.type === "number" ? `inputmode="numeric" min="${f.min}" step="1"` : ""} placeholder="${esc(f.placeholder || "")}" autocomplete="off"></div>`;
+      }
+      return `<div class="field" data-cell="${f.name}"><label for="${id}">${esc(f.label)}</label>${ctl}<p class="error" role="alert"></p></div>`;
+    }).join("");
+    return `<div class="flock-row"><div class="flock-row-head"><b></b><button type="button" class="link-btn" data-remove-row>Remove</button></div><div class="form-grid">${cells}</div></div>`;
+  }
+
+  // Renumbers the rows, hides "Remove" when only one is left, and updates the live total.
+  function refreshRows() {
+    const rows = $$(".flock-row");
+    let birds = 0;
+    rows.forEach((r, i) => {
+      $("b", r).textContent = `Flock ${i + 1}`;
+      const rm = $("[data-remove-row]", r);
+      rm.hidden = rows.length === 1;
+      rm.setAttribute("aria-label", `Remove flock ${i + 1}`);
+      birds += num($('[data-f="count"]', r).value);
+    });
+    const total = $("#rows-total");
+    if (total) total.textContent = birds ? `${fmtInt(birds)} birds across ${rows.length} flock${rows.length === 1 ? "" : "s"}` : "";
+  }
+
+  function mountRows(rf) {
+    $("#form-grid").insertAdjacentHTML("beforeend",
+      `<div class="flock-rows-wrap"><div id="flock-rows"></div><button type="button" class="btn ghost" id="add-row">${icon("plus", 14)}Add another flock</button><p class="rows-total" id="rows-total" aria-live="polite"></p></div>`);
+    const box = $("#flock-rows");
+    const add = (focus) => {
+      box.insertAdjacentHTML("beforeend", rowHTML(rf));
+      refreshRows();
+      if (focus) { const rows = $$(".flock-row"); $("input", rows[rows.length - 1]).focus(); }
+    };
+    add(false);
+    $("#add-row").addEventListener("click", () => add(true));
+    box.addEventListener("click", (e) => {
+      const rm = e.target.closest("[data-remove-row]");
+      if (!rm || $$(".flock-row").length === 1) return;
+      rm.closest(".flock-row").remove();
+      refreshRows();
+    });
+    box.addEventListener("input", refreshRows);
+  }
+
+  // Validates every row. Returns the cleaned rows and the first invalid control (if any).
+  // Also blocks the same flock name twice: inside this batch, or against flocks the farm already has.
+  function collectRows(rf) {
+    const existing = new Set(state.data.flock.map((f) => String(f.identifier).trim().toLowerCase()));
+    const seen = new Set();
+    let firstBad = null;
+    const rows = $$(".flock-row").map((row) => {
+      const v = {};
+      rf.forEach((f) => {
+        let val = $(`[data-f="${f.name}"]`, row).value.trim();
+        if (f.type === "number") val = val === "" ? "" : Number(val);
+        v[f.name] = val;
+      });
+      const errs = validate(v, { fields: rf });
+      const key = String(v.identifier).toLowerCase();
+      if (key && !errs.identifier) {
+        if (seen.has(key)) errs.identifier = "Another flock above already uses this name.";
+        else if (existing.has(key)) errs.identifier = "A flock with this name already exists on this farm.";
+        seen.add(key);
+      }
+      rf.forEach((f) => {
+        const cell = $(`[data-cell="${f.name}"]`, row), el = $(`[data-f="${f.name}"]`, row);
+        $(".error", cell).textContent = errs[f.name] || "";
+        cell.classList.toggle("invalid", !!errs[f.name]);
+        el.setAttribute("aria-invalid", errs[f.name] ? "true" : "false");
+        if (errs[f.name] && !firstBad) firstBad = el;
+      });
+      return v;
+    });
+    return { rows, firstBad };
+  }
+
   function openModal(type, trigger) {
     const base = SCHEMAS[type];
     let tabKey = base.tabs ? base.tabs[0].key : null;
@@ -802,6 +972,7 @@
       refreshComputed(form, s);
     }
     mountFields();
+    if (base.rowFields) mountRows(base.rowFields); // "Add existing birds": one or more flock rows
 
     form.addEventListener("input", () => refreshComputed(form, cur()));
     form.addEventListener("change", () => refreshComputed(form, cur()));
@@ -810,14 +981,16 @@
       if (saving) return;
       const s = cur();
       const res = collect(form, s);
-      if (res.names.length) {
+      const rr = base.rowFields ? collectRows(base.rowFields) : null;
+      if (res.names.length || (rr && rr.firstBad)) {
         res.names.forEach((n) => setError(n, res.errs[n]));
-        const el = $("#f-" + res.names[0]);
+        const el = res.names.length ? $("#f-" + res.names[0]) : rr.firstBad;
         if (el) el.focus();
         return;
       }
-      if (base.tabs) showReview(res.clean, s); // "Next" -> review step
-      else save(type, res.clean, s, $("#save-btn"), $("#form-error"));
+      const clean = rr ? { ...res.clean, rows: rr.rows } : res.clean;
+      if (base.tabs) showReview(clean, s); // "Next" -> review step
+      else save(type, clean, s, $("#save-btn"), $("#form-error"));
     });
 
     if (tabsEl) {
@@ -941,6 +1114,9 @@
         closeModal(); toast(s.saved);
         boot(); // reload the shell and open the new farm's dashboard
         location.hash = "#/dashboard";
+      } else if (type === "opening") {
+        await api.createOpening(clean);
+        closeModal(); toast(s.saved); renderView();
       } else {
         const payload = s.summary ? { ...clean, type: s.label, code: s.code, details: s.summary(clean) } : clean;
         await api.create(type, payload);
@@ -1030,7 +1206,19 @@
     if (!act) return;
     switch (act.dataset.action) {
       case "add-record": openModal(act.dataset.type, act); break;
-      case "create-farm": openModal("farm", act); break;
+      case "add-existing": openModal("opening", act); break;
+      case "skip-opening":
+        // Only hides the card for this farm; no data is deleted or locked.
+        try { localStorage.setItem(skipKey(), "1"); } catch { /* storage unavailable */ }
+        renderView();
+        break;
+      case "create-farm": {
+        // opened from the farm dropdown: close it first and return focus to the farm button
+        const fromMenu = act.closest(".menu");
+        closeMenus();
+        openModal("farm", fromMenu ? $("#farm-btn") : act);
+        break;
+      }
       case "go-dashboard": location.hash = "#/dashboard"; break;
       case "retry": boot(); break;
       case "export-records": exportRecords(act.dataset.type); break;
