@@ -82,6 +82,7 @@
     inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
     alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/>',
     shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4M12 16h.01"/>',
+    edit: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
     plus: '<path d="M5 12h14M12 5v14"/>',
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
@@ -93,13 +94,11 @@
 
   /* =====================================================================
      STATE + DATA LAYER
-     Flocks, production and activities are loaded from the Django API.
-     Sales, purchase and expense have no endpoints yet, so they stay in
-     this browser's localStorage. In DEV mode (?demo=1 / ?dev=1) everything
-     is local.
+     Every record type is loaded from and saved to the Django API.
+     In DEV mode (?demo=1 / ?dev=1) everything stays local to this browser.
      ===================================================================== */
   const TYPES = ["flock", "production", "sales", "purchase", "expense", "activity"];
-  const emptyData = () => Object.fromEntries(TYPES.map((t) => [t, []]));
+  const emptyData = () => Object.fromEntries([...TYPES, "adjustment"].map((t) => [t, []]));
 
   const state = {
     user: { name: "Jane Doe", email: "jane1122@gmail.com" },
@@ -111,6 +110,8 @@
     status: "loading", // loading | ready | error | forbidden
     query: "",
     range: "monthly",
+    // Feeds the forms: customer and supplier suggestions, and the item (product) list
+    lookups: { customers: [], suppliers: [], items: [] },
   };
   const farm = () => state.farms.find((f) => f.id === state.farmId) || null;
 
@@ -128,14 +129,14 @@
       let saved = null;
       try { saved = JSON.parse(localStorage.getItem(farmsKey)); } catch { /* ignore */ }
       state.farms = saved || (params.has("demo")
-        ? [{ id: "greenfield", name: "Greenfield farm", location: "Ogun state, Nigeria", settings: { currency: "NGN", timezone: "Africa/Lagos", unit_system: "metric" } }]
+        ? [{ id: "greenfield", name: "Greenfield farm", location: "Ogun state, Nigeria", farm_type: "layers", settings: { currency: "NGN", timezone: "Africa/Lagos", unit_system: "metric" } }]
         : []);
     },
     // Stand-in for POST /api/farms/  ->  { farm: { id, name }, role: "OWNER" }
     async createFarm(v) {
       if (!DEV) { const f = await AgroAPI.createFarm(v); state.farms.push(f); return f; }
       await delay(300);
-      const f = { id: uid(), name: v.name, location: v.location, contact_info: v.contact_info, role: "OWNER",
+      const f = { id: uid(), name: v.name, location: v.location, contact_info: v.contact_info, farm_type: v.farm_type || "layers", role: "OWNER",
         settings: { currency: v.currency, timezone: v.timezone, unit_system: v.unit_system } };
       state.farms.push(f);
       try { localStorage.setItem(farmsKey, JSON.stringify(state.farms)); } catch { /* ignore */ }
@@ -143,25 +144,48 @@
     },
     async load() {
       if (!DEV) {
-        // sales/purchase/expense have no endpoints yet, so they stay local
-        const saved = readStore() || {};
-        const server = await AgroAPI.loadFarmData(state.farmId);
-        state.data = { ...emptyData(), sales: saved.sales || [], purchase: saved.purchase || [], expense: saved.expense || [], ...server };
+        const [data, lookups] = await Promise.all([AgroAPI.loadFarmData(state.farmId), AgroAPI.loadLookups(state.farmId)]);
+        state.data = { ...emptyData(), ...data };
+        state.lookups = { customers: [], suppliers: [], items: [], ...lookups };
+        resolveNames();
         return;
       }
       await delay(150);
       const saved = readStore();
       state.data = { ...emptyData(), ...(saved || {}) };
       if (!saved && params.has("demo")) { state.data = demoData(); state.settings.dailyEggTarget = 4500; }
+      state.lookups = devLookups();
+    },
+    // Re-fetches only the data behind one Records tab (and flocks too for activities,
+    // because a mortality changes current_count). Silent: it never shows the loading card.
+    async refresh(type) {
+      if (DEV) return;
+      const id = state.farmId;
+      const fresh = {};
+      if (type === "flock") fresh.flock = await AgroAPI.listFlocks(id);
+      else if (type === "production") fresh.production = await AgroAPI.listProduction(id);
+      else if (type === "activity") {
+        const r = await Promise.all([AgroAPI.listActivities(id), AgroAPI.listFlocks(id)]);
+        fresh.activity = r[0]; fresh.flock = r[1];
+      } else if (type === "sales") fresh.sales = await AgroAPI.listSales(id);
+      else if (type === "purchase") fresh.purchase = await AgroAPI.listPurchases(id);
+      else if (type === "expense") fresh.expense = await AgroAPI.listExpenses(id);
+      else if (type === "adjustment") fresh.adjustment = await AgroAPI.listAdjustments(id);
+      else return;
+      if (id !== state.farmId) return; // user switched farms while this was loading
+      Object.assign(state.data, fresh);
+      resolveNames();
     },
     async create(type, values) {
-      if (!DEV && (type === "flock" || type === "activity" || type === "production")) {
+      if (!DEV) {
         await AgroAPI.createRecord(type, state.farmId, values);
-        await api.load(); // reloads flocks too, so a mortality updates current_count
+        await api.load(); // reloads everything, so a mortality also updates the flock's current_count
         return;
       }
       await delay(250);
       const rec = { created_at: new Date().toISOString(), created_by: state.user.name, ...values, id: uid() };
+      if (type === "sales") rec.product = (state.lookups.items.find((i) => String(i.id) === String(values.product)) || {}).name || values.product;
+      if (type === "purchase") rec.item = (state.lookups.items.find((i) => String(i.id) === String(values.item)) || {}).name || values.item;
       state.data[type].unshift(rec);
       if (values.code === "MORTALITY") { // DEV only: the server calculates counts
         const fl = findFlock(values.flock);
@@ -172,6 +196,42 @@
       }
       writeStore();
       return rec;
+    },
+    // Adjustments: POST /api/farms/{id}/adjustments/create/ (the server applies the change and keeps the record of it)
+    async adjust(rec, sp, payload) {
+      if (!DEV) {
+        await AgroAPI.createAdjustment(state.farmId, payload);
+        await api.load(); // reloads everything so the corrected value shows
+        return;
+      }
+      await delay(250);
+      rec[sp.ui] = payload.changes[0].new_value; // DEV only: the server does this for real
+      state.data.adjustment.unshift({ id: uid(), date: new Date().toISOString(), target_model: payload.target_model, target_id: rec.id, reason: payload.reason, notes: payload.notes, changes: payload.changes, created_at: new Date().toISOString(), created_by: state.user.name });
+      if (rec.starting_count && sp.key === "current_count") rec.mortality_rate = +(((rec.starting_count - rec.current_count) / rec.starting_count) * 100).toFixed(1);
+      writeStore();
+    },
+    // A later payment against an existing sale, purchase or expense: POST /api/farms/{id}/payments/.
+    // It never creates a new record. The server links the payment to the original one and lowers
+    // its outstanding balance. Only that tab's list is re-fetched afterwards.
+    async recordPayment(type, rec, v) {
+      if (!DEV) {
+        await AgroAPI.recordPayment(state.farmId, {
+          transaction_type: PAYMENT_KIND[type],
+          transaction_id: rec.id,
+          amount: v.amount,
+          payment_method: v.method,
+          event_date: v.date,
+          reference: v.reference,
+        });
+        await api.refresh(type);
+        return;
+      }
+      await delay(250);
+      const pay = { id: uid(), date: v.date, amount: num(v.amount), method: v.method, reference: v.reference || "", created_by: state.user.name };
+      rec.payments = [...(rec.payments || []), pay]; // DEV only: the server does this for real
+      rec.amount_paid = num(rec.amount_paid) + pay.amount;
+      rec.outstanding_balance = Math.max(0, num(rec.outstanding_balance) - pay.amount);
+      writeStore();
     },
     // "Add existing birds": POST /api/farms/{id}/opening-position/
     // One request carries every flock row from the modal (flock_lines is a list).
@@ -200,6 +260,38 @@
     },
   };
 
+  // A sale or purchase from the server may carry only ids; fill in the customer, supplier and
+  // product/item names from the lookups.
+  function resolveNames() {
+    const { customers, suppliers = [], items } = state.lookups;
+    const itemNames = (lines) => lines.map((l) => (items.find((i) => String(i.id) === String(l.item)) || {}).name).filter(Boolean).join(", ");
+    state.data.sales.forEach((r) => {
+      if (!r.customer && r.party != null) {
+        const c = customers.find((x) => String(x.id) === String(r.party));
+        if (c) r.customer = c.name;
+      }
+      if (!r.product && Array.isArray(r.lines)) r.product = itemNames(r.lines);
+    });
+    state.data.purchase.forEach((r) => {
+      if (!r.supplier && r.party != null) {
+        const s = suppliers.find((x) => String(x.id) === String(r.party));
+        if (s) r.supplier = s.name;
+      }
+      if (!r.item && Array.isArray(r.lines)) r.item = itemNames(r.lines);
+    });
+    state.data.expense.forEach((r) => {
+      if (!r.supplier && r.party != null) {
+        const s = suppliers.find((x) => String(x.id) === String(r.party));
+        if (s) r.supplier = s.name;
+      }
+    });
+  }
+  const devLookups = () => ({
+    customers: [{ id: "c1", name: "Mama Ngozi" }, { id: "c2", name: "Fresh Mart" }, { id: "c3", name: "Ade Stores" }],
+    suppliers: [{ id: "s1", name: "Agro Feeds Ltd" }, { id: "s2", name: "VetCare Supplies" }],
+    items: [{ id: "item-eggs", name: "Eggs" }, { id: "item-hens", name: "Spent hens" }, { id: "item-manure", name: "Manure" }, { id: "item-feed", name: "Feed" }],
+  });
+
   function demoData() {
     let seed = 7;
     const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
@@ -222,7 +314,9 @@
         const dt = new Date(now.getFullYear(), m, 5 + k * 8);
         const season = 0.7 + 0.6 * Math.sin((m + 1) / 12 * Math.PI) + rnd() * 0.3;
         const qty = Math.round((120 + rnd() * 100) * season), price = Math.round(1800 + rnd() * 400);
-        d.sales.push({ id: uid(), created_at: at(dt, 10), created_by: "Jane Doe", date: localISO(dt), customer: ["Mama Ngozi", "Fresh Mart", "Ade Stores"][k], product: "Eggs", quantity: qty, unit: "Crate", price, discount: 0, total: qty * price });
+        // Every third sale is only partly paid, so the Outstanding column has something to show.
+        const total = qty * price, paid = k === 2 ? Math.round(total * 0.6) : total;
+        d.sales.push({ id: uid(), created_at: at(dt, 10), created_by: "Jane Doe", date: localISO(dt), customer: ["Mama Ngozi", "Fresh Mart", "Ade Stores"][k], product: "Eggs", quantity: qty, unit: "Crate", price, discount_type: "FIXED", discount_value: 0, total, amount_paid: paid, outstanding_balance: total - paid });
       }
       for (let k = 0; k < 2; k++) {
         const dt = new Date(now.getFullYear(), m, 3 + k * 12);
@@ -230,7 +324,8 @@
         d.purchase.push({ id: uid(), created_at: at(dt, 9), created_by: "Jane Doe", date: localISO(dt), supplier: "Agro Feeds Ltd", item: "Feed", quantity: qty, unit: "Bag", unit_cost: cost, total_cost: qty * cost, amount_paid: qty * cost, outstanding_balance: 0 });
       }
       const dt = new Date(now.getFullYear(), m, 20);
-      d.expense.push({ id: uid(), created_at: at(dt, 11), created_by: "Jane Doe", date: localISO(dt), supplier: "Staff payroll", description: "Monthly wages", amount: Math.round(60000 + rnd() * 20000), payment_details: "Bank transfer", amount_paid: 0, amount_owed: 0 });
+      const wages = Math.round(60000 + rnd() * 20000);
+      d.expense.push({ id: uid(), created_at: at(dt, 11), created_by: "Jane Doe", date: localISO(dt), supplier: "Staff payroll", description: "Monthly wages", amount: wages, payment_details: "Bank transfer", amount_paid: wages, outstanding_balance: 0 });
     }
     return d;
   }
@@ -245,6 +340,39 @@
   const UNITS = list("Egg", "Tray", "Crate", "Bird", "Bag", "Kg", "Litre", "Piece");
   const fieldOf = (s, name) => allFields(s).find((f) => f.name === name);
   const unitQty = (r) => `${fmtInt(r.quantity)}${r.unit ? " " + r.unit : ""}`;
+
+  // ----- Discounts and payments -----
+  // The Sales form works out: subtotal -> discount -> total -> amount still owed.
+  // These numbers come from the fields the user typed. The computed boxes are display only,
+  // so they are never read back as input (they hold formatted text such as "NGN 1,000.00").
+  const saleSubtotal = (v) => num(v.quantity) * num(v.price);
+  const saleDiscount = (v) => {
+    const sub = saleSubtotal(v);
+    const raw = v.discount_type === "PERCENT" ? sub * (num(v.discount_value) / 100) : num(v.discount_value);
+    return Math.min(sub, Math.max(0, raw)); // a discount can never be more than the sale itself
+  };
+  const saleTotal = (v) => Math.max(0, saleSubtotal(v) - saleDiscount(v));
+  const discountText = (r) => (num(r.discount_value) > 0 ? (r.discount_type === "PERCENT" ? `${num(r.discount_value)}%` : fmtMoney(r.discount_value)) : "None");
+  // Tone for the "Outstanding" card in the View windows: red when money is still owed.
+  const owedTone = (v) => (num(v) > 0 ? "red" : "green");
+  // Later payments: the record type in this app -> the transaction_type the backend expects.
+  const PAYMENT_KIND = { sales: "SALE", purchase: "PURCHASE", expense: "EXPENSE" };
+  const PAYMENT_METHODS = [["CASH", "Cash"], ["BANK_TRANSFER", "Bank Transfer"], ["CARD", "Card/POS"]];
+  const methodLabel = (m) => (PAYMENT_METHODS.find((x) => x[0] === String(m).toUpperCase()) || [0, m || "—"])[1];
+
+  // Every farm type the app will offer. Only entries with ready: true can be created today.
+  // "value" is what the backend stores in farm_type. To open a new type later: add it to the backend
+  // choices, then flip ready to true here. The picker itself needs no other change.
+  const FARM_CATALOG = [
+    { value: "layers", group: "Poultry", title: "Egg production", desc: "Flocks, daily egg collection and egg sales.", keywords: "poultry chicken eggs layers hens", ready: true },
+    { value: "broilers", group: "Poultry", title: "Meat birds", desc: "Broiler flocks raised for meat.", keywords: "poultry chicken broilers meat", ready: false },
+    { value: "both", group: "Poultry", title: "Egg and meat birds", desc: "Layers and broilers on the same farm.", keywords: "poultry chicken eggs meat both mixed", ready: false },
+    { value: "corn", group: "Crops", title: "Corn (maize)", desc: "Planting, harvest and yield tracking.", keywords: "crop maize corn grain", ready: false },
+    { value: "cocoa", group: "Crops", title: "Cocoa", desc: "Plantation, harvest and drying records.", keywords: "crop cocoa cacao plantation", ready: false },
+    { value: "cassava", group: "Crops", title: "Cassava", desc: "Planting, harvest and processing records.", keywords: "crop cassava tuber root", ready: false },
+    { value: "fish", group: "Fish and livestock", title: "Fish farming", desc: "Ponds, feeding and harvest records.", keywords: "fish catfish tilapia pond aquaculture", ready: false },
+    { value: "cattle", group: "Fish and livestock", title: "Cattle and goats", desc: "Herd, health and sales records.", keywords: "livestock cattle cow goat sheep herd", ready: false },
+  ];
 
   const SCHEMAS = {
     farm: {
@@ -312,33 +440,49 @@
     },
     sales: {
       title: "Sales Records", sub: "Record a sale", saved: "Sale record saved.",
+      errorMap: { event_date: "date", party: "customer", lines: "product" },
       fields: [
         { name: "date", label: "Sale Date", type: "date", required: true },
-        { name: "customer", label: "Customer", type: "text", placeholder: "Enter customer", required: true },
-        { name: "product", label: "Product", type: "text", placeholder: "Enter product", required: true, suggest: list("Eggs", "Spent hens", "Manure") },
+        // Type a new name or pick an existing customer. A new name is saved as a customer automatically.
+        { name: "customer", label: "Customer", type: "text", placeholder: "Enter or choose a customer", required: true, suggest: () => state.lookups.customers.map((c) => c.name) },
+        { name: "product", label: "Product", type: "select", placeholder: "Enter product", emptyText: "No products yet. Record egg production first.", required: true, options: () => state.lookups.items.map((i) => [i.id, i.name]) },
         { name: "quantity", label: "Quantities", type: "number", placeholder: "Enter quantity", required: true, min: 0.01 },
-        { name: "unit", label: "Unit", type: "select", placeholder: "Enter unit", required: true, options: UNITS },
         { name: "price", label: "Prices", type: "number", placeholder: "Enter price", required: true, min: 0, step: "0.01" },
+        { name: "discount_type", label: "Discount Type", type: "select", default: "FIXED", options: [["FIXED", "Fixed Amount"], ["PERCENT", "Percentage (%)"]] },
+        { name: "discount_value", label: "Discount Value", type: "number", placeholder: "0", min: 0, step: "0.01" },
         { name: "total", label: "Total Sale Value", type: "computed", fmt: fmtMoney },
-        { name: "discount", label: "Discount", type: "number", placeholder: "Enter discount", min: 0, step: "0.01" },
+        { name: "amount_paid", label: "Amount Paid Now", type: "number", placeholder: "0.00", min: 0, step: "0.01" },
+        { name: "outstanding_balance", label: "Amount Owed", type: "computed", fmt: fmtMoney },
+        { name: "notes", label: "Notes", type: "textarea", placeholder: "Write Something" },
       ],
-      calc: (v) => ({ total: Math.max(0, num(v.quantity) * num(v.price) - num(v.discount)) }),
-      check: (v) => (num(v.discount) > num(v.quantity) * num(v.price) ? { discount: "Discount cannot be more than the sale amount." } : {}),
+      calc: (v) => {
+        const total = saleTotal(v);
+        return { total, outstanding_balance: Math.max(0, total - num(v.amount_paid)) };
+      },
+      check: (v) => {
+        const errs = {};
+        if (v.discount_type === "PERCENT" && num(v.discount_value) > 100) errs.discount_value = "A percentage discount cannot be more than 100.";
+        else if (v.discount_type !== "PERCENT" && num(v.discount_value) > saleSubtotal(v)) errs.discount_value = "The discount cannot be more than the sale amount.";
+        if (num(v.amount_paid) > saleTotal(v)) errs.amount_paid = "Amount paid cannot be more than the total sale value.";
+        return errs;
+      },
     },
     purchase: {
       title: "Purchase Records", sub: "Record goods bought for the farm", saved: "Purchase record saved.",
+      // The backend names: party = the supplier, lines = the item bought
+      errorMap: { event_date: "date", party: "supplier", lines: "item" },
       fields: [
         { name: "date", label: "Purchase Date", type: "date", required: true },
-        { name: "supplier", label: "Supplier", type: "text", placeholder: "Enter supplier", required: true },
-        { name: "item", label: "Item", type: "text", placeholder: "Enter item", required: true, suggest: list("Feed", "Medication", "Vaccine", "Packaging", "Equipment") },
+        // Type a new name or pick an existing supplier. A new name is saved as a supplier automatically.
+        { name: "supplier", label: "Supplier", type: "text", placeholder: "Enter or choose a supplier", required: true, suggest: () => (state.lookups.suppliers || []).map((s) => s.name) },
+        { name: "item", label: "Item", type: "select", placeholder: "Enter item", emptyText: "No items yet. Add an item on the server first.", required: true, options: () => state.lookups.items.map((i) => [i.id, i.name]) },
         { name: "quantity", label: "Quantity", type: "number", placeholder: "Enter quantity", required: true, min: 0.01 },
-        { name: "unit", label: "Unit", type: "select", placeholder: "Enter unit", required: true, options: UNITS },
         { name: "unit_cost", label: "Unit Cost", type: "number", placeholder: "Enter unit cost", required: true, min: 0, step: "0.01" },
         { name: "total_cost", label: "Total Cost", type: "computed", fmt: fmtMoney },
-        { name: "stock_received", label: "Stock Received details", type: "text", placeholder: "Enter details" },
-        { name: "amount_paid", label: "Amount paid", type: "number", placeholder: "Enter amount", min: 0, step: "0.01" },
-        { name: "outstanding_balance", label: "Outstanding balance", type: "computed", fmt: fmtMoney },
-        { name: "payment_history", label: "Payment history", type: "text", placeholder: "Enter payment history" },
+        { name: "amount_paid", label: "Amount Paid Now", type: "number", placeholder: "0.00", min: 0, step: "0.01" },
+        { name: "outstanding_balance", label: "Amount Owed", type: "computed", fmt: fmtMoney },
+        // Sent to the backend as the purchase notes
+        { name: "stock_received", label: "Notes / stock received", type: "text", placeholder: "Enter details" },
       ],
       calc: (v) => {
         const total = Math.max(0, num(v.quantity) * num(v.unit_cost));
@@ -348,17 +492,20 @@
     },
     expense: {
       title: "Expenses Records", sub: "Record a farm expense", saved: "Expense record saved.",
+      // The backend names: party = the supplier, notes = the description
+      errorMap: { event_date: "date", party: "supplier", notes: "description" },
       fields: [
         { name: "date", label: "Expense Date", type: "date", required: true },
-        { name: "supplier", label: "Supplier", type: "text", placeholder: "Enter supplier" },
+        // Optional. Type a new name or pick an existing supplier. A new name is saved as a supplier automatically.
+        { name: "supplier", label: "Supplier (Optional)", type: "text", placeholder: "Enter or choose a supplier", suggest: () => (state.lookups.suppliers || []).map((x) => x.name) },
         { name: "amount", label: "Amount", type: "number", placeholder: "Enter amount", required: true, min: 0.01, step: "0.01" },
         { name: "payment_details", label: "Payment details", type: "select", placeholder: "Enter details", required: true, options: list("Cash", "Bank transfer", "Card/POS", "Mobile money", "On credit") },
-        { name: "amount_paid", label: "Amount paid", type: "number", placeholder: "Enter amount", min: 0, step: "0.01" },
-        { name: "amount_owed", label: "Amount owed", type: "computed", fmt: fmtMoney },
+        { name: "amount_paid", label: "Amount Paid Now", type: "number", placeholder: "0.00", min: 0, step: "0.01" },
+        { name: "outstanding_balance", label: "Amount Owed", type: "computed", fmt: fmtMoney },
         { name: "description", label: "Description", type: "textarea", short: true, placeholder: "Enter description", required: true },
         { name: "supporting_note", label: "Supporting Note", type: "textarea", short: true, placeholder: "Write something" },
       ],
-      calc: (v) => ({ amount_owed: Math.max(0, num(v.amount) - num(v.amount_paid)) }),
+      calc: (v) => ({ outstanding_balance: Math.max(0, num(v.amount) - num(v.amount_paid)) }),
       check: (v) => (num(v.amount_paid) > num(v.amount) ? { amount_paid: "Amount paid cannot be more than the amount." } : {}),
     },
     activity: {
@@ -433,16 +580,42 @@
 
   /* =====================================================================
      TABLE COLUMNS (records list)
+     Each column is [header, getter, isNumber?, shortenOnScreen?].
+     The 4th flag only shortens the text on screen (with the full text in a tooltip);
+     the CSV export and the search box still use the full text.
      ===================================================================== */
   const COLS = {
     flock: [["Identifier", (r) => r.identifier], ["Breed/Type", (r) => r.breed], ["Arrival date", (r) => fmtDate(r.arrival_date)], ["Starting count", (r) => fmtInt(r.starting_count), 1], ["Current count", (r) => fmtInt(r.current_count), 1], ["Stage", (r) => r.stage], ["Status", (r) => r.status]],
     production: [["Date", (r) => fmtDate(r.date)], ["Flock", (r) => flockName(r.flock)], ["Collected", (r) => fmtInt(r.collected), 1], ["Damaged", (r) => fmtInt(r.damaged || 0), 1], ["Saleable", (r) => fmtInt(r.saleable), 1], ["Recorded by", (r) => r.recorded_by]],
-    sales: [["Date", (r) => fmtDate(r.date)], ["Customer", (r) => r.customer], ["Product", (r) => r.product], ["Quantity", (r) => unitQty(r), 1], ["Total", (r) => fmtMoney(r.total), 1]],
+    sales: [["Date", (r) => fmtDate(r.date)], ["Customer", (r) => r.customer], ["Product", (r) => r.product], ["Quantity", (r) => unitQty(r), 1], ["Total", (r) => fmtMoney(r.total), 1], ["Outstanding", (r) => fmtMoney(r.outstanding_balance || 0), 1]],
     purchase: [["Date", (r) => fmtDate(r.date)], ["Supplier", (r) => r.supplier], ["Item", (r) => r.item], ["Quantity", (r) => unitQty(r), 1], ["Total cost", (r) => fmtMoney(r.total_cost), 1], ["Outstanding", (r) => fmtMoney(r.outstanding_balance || 0), 1]],
-    expense: [["Date", (r) => fmtDate(r.date)], ["Supplier", (r) => r.supplier || "—"], ["Description", (r) => r.description], ["Amount", (r) => fmtMoney(r.amount), 1], ["Owed", (r) => fmtMoney(r.amount_owed || 0), 1]],
+    expense: [["Date", (r) => fmtDate(r.date)], ["Supplier", (r) => r.supplier || "—"], ["Description", (r) => r.description], ["Amount", (r) => fmtMoney(r.amount), 1], ["Outstanding", (r) => fmtMoney(r.outstanding_balance || 0), 1]],
+    adjustment: [["Date", (r) => (r.date ? fmtWhen(r.date) : "—")], ["Record", (r) => adjRecordLabel(r), 0, 1], ["Reason", (r) => adjReasonLabel(r.reason)], ["Changed field", (r) => adjFieldsText(r), 0, 1], ["Old → New", (r) => adjChangeText(r), 0, 1], ["User", (r) => r.created_by || "—"], ["Notes", (r) => r.notes || "—", 0, 1]],
     activity: [["Date", (r) => fmtDate(r.date)], ["Type", (r) => r.type], ["Flock", (r) => (r.flock ? flockName(r.flock) : "—")], ["Details", (r) => r.details || "—"]],
   };
+  // Extra per-row buttons. Kept out of COLS on purpose: COLS values are escaped as text and also
+  // feed the CSV export and the search box, so button HTML there would show up as literal text.
+  const viewBtn = (action) => (r) => `<button class="btn ghost" type="button" style="padding:4px 10px;font-size:12px" data-action="${action}" data-id="${esc(r.id)}">View</button>`;
+  // The pencil opens the "Adjust" form for that record (flocks, sales, purchases and expenses).
+  const pencilBtn = (type) => (r) => `<button class="btn ghost" type="button" title="Adjust this record" aria-label="Adjust this record" style="padding:4px 8px;font-size:12px" data-action="adjust-record" data-rtype="${type}" data-id="${esc(r.id)}">${icon("edit", 15)}</button>`;
+  const rowBtns = (view, type) => (r) => `<span style="display:inline-flex;gap:6px;align-items:center">${view(r)}${pencilBtn(type)(r)}</span>`;
+  const ROW_ACTIONS = {
+    flock: rowBtns(viewBtn("view-flock"), "flock"),
+    production: viewBtn("view-production"),
+    activity: viewBtn("view-activity"),
+    sales: rowBtns(viewBtn("view-sale"), "sales"),
+    purchase: rowBtns(viewBtn("view-purchase"), "purchase"),
+    expense: rowBtns(viewBtn("view-expense"), "expense"),
+    adjustment: viewBtn("view-adjustment"),
+  };
   const TABS = [["flock", "Flock"], ["production", "Production"], ["sales", "Sales"], ["purchase", "Purchase"], ["expense", "Expense"], ["activity", "Farm activities"]];
+  // No "Adjustments" tab on purpose. The farm-wide Adjustment Log will be built with the Reports page (SRS 14.2).
+  // The data is still loaded (state.data.adjustment) because the per-record "Adjustment history" in the View windows uses it,
+  // and COLS.adjustment / openViewAdjustmentModal are kept so the Reports page can reuse them later.
+  // ?type=broilers (or layers / both) previews another farm type without changing the farm.
+  const farmType = () => String(params.get("type") || (farm() && farm().farm_type) || "layers").toLowerCase();
+  const hasEggs = () => farmType() !== "broilers";
+  const visibleTabs = () => TABS.filter(([k]) => k !== "production" || hasEggs());
   const NAV = [["dashboard", "Dashboard"], ["records", "Records"], ["inventory", "Inventory"], ["reports", "Reports"], ["users", "Users & Permissions"]];
   const NAV_ICON = { dashboard: "dashboard", records: "records", inventory: "inventory", reports: "reports", users: "users" };
 
@@ -637,6 +810,16 @@
     </section>`;
   }
 
+  function flockOverviewCard() {
+    const fl = state.data.flock.filter((f) => f.status === "Active").slice(0, 5);
+    return `<section class="card perf area-perf">
+          <h3>Flock overview</h3>
+          <p class="sub">Birds on your farm</p>
+          ${fl.length ? fl.map((f) => `<div class="act">${icon("bird", 18)}<div class="txt"><b>${esc(f.identifier)}</b><small>${esc(f.stage)} • ${fmtInt(f.current_count)} of ${fmtInt(f.starting_count)} birds</small></div><time>${num(f.mortality_rate).toFixed(1)}% lost</time></div>`).join("") : `<div class="empty-line">No active flocks yet.</div>`}
+          <div class="below"><span>${fmtInt(metrics().live)} live birds</span><button class="chip" data-action="review-flock">View flocks</button></div>
+        </section>`;
+  }
+
   function dashboardView() {
     const m = metrics();
     const h = new Date().getHours();
@@ -656,7 +839,7 @@
 
       <div class="stats">
         ${statCard("bird", "Live birds", fmtInt(m.live), null)}
-        ${statCard("egg", "Eggs collected today", fmtInt(m.eggsToday), m.eggsDelta, "From yesterday")}
+        ${hasEggs() ? statCard("egg", "Eggs collected today", fmtInt(m.eggsToday), m.eggsDelta, "From yesterday") : statCard("bird", "Active flocks", fmtInt(state.data.flock.filter((f) => f.status === "Active").length), null)}
         ${statCard("wallet", "Stock Value", fmtMoney0(m.buyAll), m.buyDelta, "From last month")}
         ${statCard("trend", "Sales this month", fmtMoney0(m.sellM), m.sellDelta, "From last month")}
       </div>
@@ -677,7 +860,7 @@
           <div class="chart" id="chart">${chartHTML()}</div>
         </section>
 
-        <section class="card perf area-perf">
+        ${hasEggs() ? `<section class="card perf area-perf">
           <h3>Production performance</h3>
           <p class="sub">Today's laying target</p>
           <div class="donut">
@@ -687,7 +870,7 @@
           <div class="split"><div><small>Collected</small><b>${fmtInt(m.eggsToday)}</b></div><div class="vr"></div><div><small>Target</small><b>${fmtInt(m.target)}</b></div></div>
           <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(rate, 100).toFixed(0)}"><i style="width:${Math.min(rate, 100)}%"></i></div>
           <div class="below"><span>${fmtInt(below)} eggs below target</span>${below > 0 && m.target > 0 ? `<button class="chip" data-action="review-flock">Review flock</button>` : ""}</div>
-        </section>
+        </section>` : flockOverviewCard()}
 
         <section class="card recent area-recent">
           <div class="card-head"><h3>Recent Activity</h3><button class="link-btn" data-action="view-all">View all ${icon("chevronRight", 14)}</button></div>
@@ -708,17 +891,27 @@
     // Permanent entry point for users who skipped the dashboard card
     const addExisting = type === "flock" ? `<button class="btn ghost" data-action="add-existing">${icon("bird", 16)}Add existing flocks</button>` : "";
     const toolbar = `<div class="toolbar">
-      <div class="tabs" role="tablist" aria-label="Record types">${TABS.map(([k, l]) => `<button class="tab" role="tab" aria-selected="${k === type}" data-tab="${k}">${l}</button>`).join("")}</div>
+      <div class="tabs" role="tablist" aria-label="Record types">${visibleTabs().map(([k, l]) => `<button class="tab" role="tab" aria-selected="${k === type}" data-tab="${k}">${l}</button>`).join("")}</div>
       <div class="toolbar-actions">${addExisting}<button class="btn" data-action="export-records" data-type="${type}">${icon("upload", 16)}Export</button></div>
     </div>`;
 
     if (!rows.length) {
+      if (type === "adjustment") return toolbar + `<div class="state-card">${icon("inbox", 28)}<h2>No adjustments yet</h2><p>Corrections made with the pencil on a record will be listed here.</p></div>`;
       return toolbar + `<div class="state-card">${icon("inbox", 28)}<h2>No records yet</h2><p>Add your first record to get started</p><button class="btn" data-action="add-record" data-type="${type}">${icon("plus", 14)}Add Record</button></div>`;
     }
-    const head = cols.map(([h, , n]) => `<th class="${n ? "num" : ""}">${esc(h)}</th>`).join("");
-    const body = shown.map((r) => `<tr>${cols.map(([, fn, n]) => `<td class="${n ? "num" : ""}">${esc(fn(r))}</td>`).join("")}</tr>`).join("");
+    const rowAction = ROW_ACTIONS[type];
+    const head = cols.map(([h, , n]) => `<th class="${n ? "num" : ""}">${esc(h)}</th>`).join("") + (rowAction ? `<th class="num">Actions</th>` : "");
+    // A column with the 4th flag is shortened on screen with "…" and shows the full text on hover.
+    // The data itself (CSV export, search) is never shortened.
+    const cellHTML = (r, [, fn, n, trunc]) => {
+      const txt = fn(r);
+      return trunc
+        ? `<td class="trunc" title="${esc(txt)}">${esc(txt)}</td>`
+        : `<td class="${n ? "num" : ""}">${esc(txt)}</td>`;
+    };
+    const body = shown.map((r) => `<tr>${cols.map((c) => cellHTML(r, c)).join("")}${rowAction ? `<td class="num">${rowAction(r)}</td>` : ""}</tr>`).join("");
     return toolbar + `<section class="card table-card">
-      <div class="table-head"><h3>${esc(label)} records</h3><button class="btn" data-action="add-record" data-type="${type}">${icon("plus", 14)}Add Record</button></div>
+      <div class="table-head"><h3>${type === "adjustment" ? "Adjustment log" : esc(label) + " records"}</h3>${type === "adjustment" ? "" : `<button class="btn" data-action="add-record" data-type="${type}">${icon("plus", 14)}Add Record</button>`}</div>
       ${shown.length ? `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">No records match "${esc(state.query)}".</div>`}
     </section>`;
   }
@@ -727,6 +920,12 @@
      SHELL RENDERING + ROUTER
      ===================================================================== */
   let lastTab = "flock";
+  // A tab that is hidden for this farm type (e.g. Production on a meat-bird farm) falls back to Flock.
+  // An unknown tab (for example an old #/records/adjustment link) also falls back to Flock.
+  const pickTab = (sub) => {
+    const ok = visibleTabs().map(([k]) => k);
+    return ok.includes(sub) ? sub : ok.includes(lastTab) ? lastTab : "flock";
+  };
   function route() {
     const [, page = "dashboard", sub] = location.hash.split("/");
     const p = NAV.some((n) => n[0] === page) ? page : "dashboard";
@@ -781,7 +980,7 @@
       view.innerHTML = dashboardView();
       bindChart();
     } else if (page === "records") {
-      const type = TABS.some((t) => t[0] === sub) ? sub : lastTab;
+      const type = pickTab(sub);
       lastTab = type;
       view.innerHTML = recordsView(type);
     } else {
@@ -815,6 +1014,11 @@
      ===================================================================== */
   let modalTrigger = null, saving = false;
 
+  // Looks a form control up by its name. Do not use form.elements[name] for this: that collection has its own
+  // methods (item, namedItem, length), so a field called "item" would return the item() function instead
+  // of the input, and its value would be read as "undefined".
+  function field(form, name) { return form.elements.namedItem(name); }
+
   function optsOf(f) { return typeof f.options === "function" ? f.options() : f.options || []; }
 
   function fieldHTML(f) {
@@ -833,8 +1037,9 @@
     } else if (f.type === "readonly") {
       ctl = `<div class="control"><input id="${id}" name="${f.name}" class="ro" readonly tabindex="-1" value="${esc(f.value ? f.value() : "")}"></div>`;
     } else {
-      const list = f.suggest ? `list="dl-${f.name}"` : "";
-      const dl = f.suggest ? `<datalist id="dl-${f.name}">${f.suggest.map((o) => `<option value="${esc(o)}"></option>`).join("")}</datalist>` : "";
+      const sugg = typeof f.suggest === "function" ? f.suggest() : f.suggest;
+      const list = sugg ? `list="dl-${f.name}"` : "";
+      const dl = sugg ? `<datalist id="dl-${f.name}">${sugg.map((o) => `<option value="${esc(o)}"></option>`).join("")}</datalist>` : "";
       ctl = `<div class="control"><input id="${id}" name="${f.name}" type="${f.type}" ${list} ${f.type === "number" ? `inputmode="decimal" min="${f.min ?? ""}" step="${f.step || (f.integer ? 1 : "any")}"` : ""} placeholder="${esc(f.placeholder || "")}" autocomplete="off">${dl}</div>`;
     }
     const r = f.reveal;
@@ -934,7 +1139,500 @@
     return { rows, firstBad };
   }
 
-  function openModal(type, trigger) {
+  /* ---------- Read-only record details (one layout shared by every View window) ---------- */
+  const fmtQty = (n) => new Intl.NumberFormat(CONFIG.locale, { maximumFractionDigits: 2 }).format(n);
+
+  // Read-only data is shown as plain text (label above value), not as greyed-out input boxes.
+  // rows: [[label, value, long?]]. "long" items take the full width and wrap (notes, long old/new values).
+  // lines (optional): [{ name, quantity, unit_price, total }]
+  // adjust (optional): { type, id } adds the "Adjustment history" block and the Adjust button.
+  // summary (optional): { badge: [text, tone], stats: [[label, value], ...] } is a headline strip at the top.
+  // pay (optional): { type, id, payments, outstanding } adds the "Payment history" block and the "Record Payment" button.
+  function openDetailModal(title, sub, rows, lines, trigger, adjust, summary, pay) {
+    modalTrigger = trigger || document.activeElement;
+    const hasVal = (v) => v != null && v !== "" && v !== "—";
+    // "Created By" and "Created At" become one small line at the bottom instead of two full items.
+    const meta = {};
+    const main = rows.filter(([label, value]) => {
+      if (label === "Created By" || label === "Created At") { meta[label] = value; return false; }
+      return true;
+    });
+    const items = main
+      .filter(([label, value, long]) => !(long && !hasVal(value) && (label === "Notes" || label === "Details")))
+      .map(([label, value, long]) => `<div class="dv-item${long ? " dv-long" : ""}"><dt>${esc(label)}</dt><dd${hasVal(value) ? "" : ' class="dv-empty"'}>${esc(hasVal(value) ? value : "—")}</dd></div>`)
+      .join("");
+    const badge = summary && summary.badge ? `<span class="dv-badge ${esc(summary.badge[1] || "")}">${esc(summary.badge[0])}</span>` : "";
+    // Each KPI card is [label, value, iconName, tone]. Tones: green | amber | red | neutral.
+    const stats = summary && summary.stats ? summary.stats.map(([l, v, ic, tone]) => `<div class="dv-stat ${esc(tone || "neutral")}"><div class="dv-st"><small>${esc(l)}</small><b>${esc(v)}</b></div></div>`).join("") : "";
+    const strip = stats ? `<div class="dv-stats">${stats}</div>` : "";
+    const by = hasVal(meta["Created By"]) ? meta["Created By"] : "";
+    const at = hasVal(meta["Created At"]) ? meta["Created At"] : "";
+    const footer = by || at ? `<p class="dv-meta">Created${by ? " by " + esc(by) : ""}${at ? " · " + esc(at) : ""}</p>` : "";
+    const linesHTML = lines ? `<h3 class="dv-h">Items</h3>
+      <div class="table-wrap mini-lines"><table><thead><tr><th>Item</th><th class="num">Quantity</th><th class="num">Unit price</th><th class="num">Total</th></tr></thead><tbody>${
+        lines.length
+          ? lines.map((l) => `<tr><td>${esc(l.name || "—")}</td><td class="num">${esc(fmtQty(l.quantity))}</td><td class="num">${esc(fmtMoney(l.unit_price))}</td><td class="num">${esc(fmtMoney(l.total))}</td></tr>`).join("")
+          : `<tr><td colspan="4">No items recorded.</td></tr>`}</tbody></table></div>` : "";
+    $("#modal-root").innerHTML = `
+      <div class="backdrop" id="backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+          <button class="close" type="button" data-close aria-label="Close">${icon("x", 18)}</button>
+          <div class="dv-head"><h2 id="modal-title">${esc(title)}</h2>${badge}</div>
+          <p class="sub">${esc(sub)}</p>
+          ${strip}
+          ${items ? `<h3 class="dv-h">Details</h3><dl class="dv-grid">${items}</dl>` : ""}
+          ${linesHTML}${pay ? paymentHistoryHTML(pay.payments) : ""}${adjust ? adjHistoryHTML(adjust.type, adjust.id) : ""}
+          ${footer}
+          <div class="actions" style="margin-top:24px">${pay && pay.outstanding > 0 ? payBtn(pay.type, pay.id) : ""}${adjust ? adjustBtn(adjust.type, adjust.id) : ""}<button class="btn" type="button" data-close>Close</button></div>
+        </div>
+      </div>`;
+    document.body.style.overflow = "hidden";
+    const closeBtn = $(".actions [data-close]");
+    if (closeBtn) closeBtn.focus();
+  }
+
+  const itemNameOf = (l) => l.item_name || (state.lookups.items.find((i) => String(i.id) === String(l.item)) || {}).name || "";
+  const createdRows = (r) => [["Created By", r.created_by || "—"], ["Created At", r.created_at ? fmtWhen(r.created_at) : "—"]];
+
+  function openViewFlockModal(flockId, trigger) {
+    const f = state.data.flock.find((x) => String(x.id) === String(flockId));
+    if (!f) return;
+    openDetailModal("Flock details", `${f.identifier}: complete record for this flock`, [
+      ["Flock Identifier", f.identifier],
+      ["Breed/Type", f.breed || "—"],
+      ["Production Stage", f.stage || "—"],
+      ["Arrival Date", fmtDate(f.arrival_date)],
+      ["Age at Arrival", f.age_at_arrival != null && f.age_at_arrival !== "" ? f.age_at_arrival : "—"],
+      ...createdRows(f),
+    ], null, trigger, { type: "flock", id: f.id }, {
+      badge: f.status ? [f.status, String(f.status).toLowerCase() === "active" ? "ok" : ""] : null,
+      stats: [
+        ["Current birds", fmtInt(f.current_count), "bird", "green"],
+        ["Starting birds", fmtInt(f.starting_count), "inventory", "neutral"],
+        ["Mortality", num(f.mortality_rate).toFixed(1) + "%", "alert", num(f.mortality_rate) > 0 ? "red" : "green"],
+      ],
+    });
+  }
+
+  function openViewProductionModal(id, trigger) {
+    const r = state.data.production.find((x) => String(x.id) === String(id));
+    if (!r) return;
+    openDetailModal("Production details", `${flockName(r.flock)}: complete record for this egg collection`, [
+      ["Egg Collection Date", fmtDate(r.date)],
+      ["Flock", flockName(r.flock)],
+      ["Recorded by", r.recorded_by || "—"],
+      ["Created At", r.created_at ? fmtWhen(r.created_at) : "—"],
+      ["Notes", r.notes || "—", true],
+    ], null, trigger, null, {
+      stats: [
+        ["Collected", fmtInt(r.collected), "egg", "green"],
+        ["Damaged", fmtInt(r.damaged || 0), "alert", num(r.damaged) > 0 ? "amber" : "neutral"],
+        ["Saleable", fmtInt(r.saleable), "check", "green"],
+      ],
+    });
+  }
+
+  function openViewActivityModal(id, trigger) {
+    const r = state.data.activity.find((x) => String(x.id) === String(id));
+    if (!r) return;
+    openDetailModal("Activity details", `${r.type || "Farm activity"}: complete record`, [
+      ["Date", fmtDate(r.date)],
+      ["Type", r.type || "—"],
+      ["Flock", r.flock ? flockName(r.flock) : "—"],
+      ...(r.quantity != null && r.quantity !== "" ? [["Quantity", fmtQty(r.quantity)]] : []),
+      ...createdRows(r),
+      ["Details", r.details || "—", true],
+    ], null, trigger);
+  }
+
+  function openViewPurchaseModal(id, trigger) {
+    const r = state.data.purchase.find((x) => String(x.id) === String(id));
+    if (!r) return;
+    // Records without lines (demo data) show one line built from the row itself
+    const lines = (Array.isArray(r.lines) && r.lines.length ? r.lines : [{ item_name: r.item, quantity: r.quantity, unit_price: r.unit_cost, total: r.total_cost }])
+      .map((l) => ({ name: itemNameOf(l), quantity: l.quantity, unit_price: l.unit_price, total: l.total }));
+    openDetailModal("Purchase details", `${r.supplier || "Purchase"}: complete record for this purchase`, [
+      ["Supplier", r.supplier || "—"],
+      ["Date", fmtDate(r.date)],
+      ...createdRows(r),
+      ["Notes", r.notes || "—", true],
+    ], lines, trigger, { type: "purchase", id: r.id }, {
+      stats: [
+        ["Total cost", fmtMoney(r.total_cost), "wallet", "amber"],
+        ["Amount paid", fmtMoney(r.amount_paid || 0), "check", "green"],
+        ["Outstanding", fmtMoney(r.outstanding_balance || 0), "alert", owedTone(r.outstanding_balance)],
+      ],
+    }, { type: "purchase", id: r.id, payments: r.payments || [], outstanding: num(r.outstanding_balance) });
+  }
+
+  function openViewSaleModal(id, trigger) {
+    const r = state.data.sales.find((x) => String(x.id) === String(id));
+    if (!r) return;
+    const lines = (Array.isArray(r.lines) && r.lines.length ? r.lines : [{ item_name: r.product, quantity: r.quantity, unit_price: r.price, total: r.total }])
+      .map((l) => ({ name: itemNameOf(l), quantity: l.quantity, unit_price: l.unit_price, total: l.total }));
+    openDetailModal("Sale details", `${r.customer || "Sale"}: complete record for this sale`, [
+      ["Customer", r.customer || "—"],
+      ["Date", fmtDate(r.date)],
+      ["Discount", discountText(r)],
+      ...createdRows(r),
+      ["Notes", r.notes || "—", true],
+    ], lines, trigger, { type: "sales", id: r.id }, {
+      stats: [
+        ["Total sale value", fmtMoney(r.total), "trend", "green"],
+        ["Amount paid", fmtMoney(r.amount_paid || 0), "check", "green"],
+        ["Outstanding", fmtMoney(r.outstanding_balance || 0), "alert", owedTone(r.outstanding_balance)],
+      ],
+    }, { type: "sales", id: r.id, payments: r.payments || [], outstanding: num(r.outstanding_balance) });
+  }
+
+  function openViewExpenseModal(id, trigger) {
+    const r = state.data.expense.find((x) => String(x.id) === String(id));
+    if (!r) return;
+    openDetailModal("Expense details", "Complete record for this expense", [
+      ["Supplier", r.supplier || "—"],
+      ["Category", r.category || "—"],
+      ["Date", fmtDate(r.date)],
+      ...createdRows(r),
+      ["Notes", r.description || "—", true],
+    ], null, trigger, { type: "expense", id: r.id }, {
+      stats: [
+        ["Amount", fmtMoney(r.amount), "wallet", "amber"],
+        ["Amount paid", fmtMoney(r.amount_paid || 0), "check", "green"],
+        ["Outstanding", fmtMoney(r.outstanding_balance || 0), "alert", owedTone(r.outstanding_balance)],
+      ],
+    }, { type: "expense", id: r.id, payments: r.payments || [], outstanding: num(r.outstanding_balance) });
+  }
+
+  /* ---------- Adjustments and corrections (the pencil) ---------- */
+  const payBtn = (type, id) => `<button class="btn" type="button" data-action="record-payment" data-rtype="${type}" data-id="${esc(id)}">${icon("plus", 14)}Record Payment</button>`;
+  // The "Payment history" block shown in the View window of a sale, purchase or expense
+  function paymentHistoryHTML(payments) {
+    const rows = (payments || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    return `<h3 class="dv-h">Payment history</h3>${rows.length
+      ? `<div class="table-wrap mini-lines"><table><thead><tr><th>Date</th><th class="num">Amount</th><th>Method</th><th>Reference</th></tr></thead><tbody>${
+        rows.map((p) => `<tr><td>${esc(fmtDate(p.date))}</td><td class="num">${esc(fmtMoney(p.amount))}</td><td>${esc(methodLabel(p.method))}</td><td>${esc(p.reference || "—")}</td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="empty-line" style="padding:8px 0 0">No payments recorded yet.</p>`}`;
+  }
+  const adjustBtn = (type, id) => `<button class="btn ghost" type="button" data-action="adjust-record" data-rtype="${type}" data-id="${esc(id)}">${icon("edit", 15)}Adjust</button>`;
+
+  const ADJUST_REASONS = [["MISTAKE", "Mistake"], ["LOSS", "Loss"], ["DISCREPANCY", "Discrepancy"], ["THEFT", "Theft"], ["OTHER", "Other"]];
+  // For each record type: the name the backend knows it by, and the fields a user may correct.
+  // key = the field name sent to the backend, ui = where the current value lives on the row in this app,
+  // kind = int | decimal | money | text | select
+  const ADJUST = {
+    flock: { model: "Flock", fields: [
+      { key: "current_count", ui: "current_count", label: "Current bird count", kind: "int" },
+      { key: "initial_count", ui: "starting_count", label: "Starting bird count", kind: "int" },
+      { key: "stage", ui: "stage", label: "Production stage", kind: "select", options: ["Chick", "Grower", "Pullet", "Layer", "Spent hen"] },
+      { key: "status", ui: "status", label: "Flock status", kind: "select", options: ["Active", "Sold out", "Closed"] },
+    ] },
+    purchase: { model: "Purchase", fields: [
+      { key: "quantity", ui: "quantity", label: "Quantity", kind: "decimal" },
+      { key: "unit_price", ui: "unit_cost", label: "Unit price", kind: "money" },
+      { key: "total_amount", ui: "total_cost", label: "Total cost", kind: "money" },
+    ] },
+    sales: { model: "Sale", fields: [
+      { key: "quantity", ui: "quantity", label: "Quantity", kind: "decimal" },
+      { key: "unit_price", ui: "price", label: "Unit price", kind: "money" },
+      { key: "total_amount", ui: "total", label: "Total sale value", kind: "money" },
+    ] },
+    expense: { model: "Expense", fields: [
+      { key: "amount", ui: "amount", label: "Amount", kind: "money" },
+      { key: "notes", ui: "description", label: "Notes", kind: "text" },
+    ] },
+  };
+  const adjShow = (sp, v) => {
+    if (v == null || v === "") return "—";
+    return sp.kind === "money" ? fmtMoney(v) : sp.kind === "int" ? fmtInt(v) : sp.kind === "decimal" ? fmtQty(v) : String(v);
+  };
+  const adjNew = (sp) => {
+    const base = { name: "new_value", label: "New value", required: true };
+    if (!sp) return { ...base, type: "text", placeholder: "Choose a field first" };
+    if (sp.kind === "select") return { ...base, type: "select", placeholder: "Choose the new value", options: sp.options };
+    if (sp.kind === "text") return { ...base, type: "text", placeholder: "Enter the corrected text" };
+    return { ...base, type: "number", placeholder: "Enter the corrected value", min: 0, integer: sp.kind === "int", step: sp.kind === "int" ? undefined : "0.01" };
+  };
+
+  // ----- Adjustment log helpers -----
+  // The server may name the record type "Purchase", "purchase" or "app.purchase"; compare on the last part, lower-cased.
+  const adjModelKey = (a) => String(a.target_model || "").split(".").pop().toLowerCase();
+  const adjTypeOf = (a) => Object.keys(ADJUST).find((k) => ADJUST[k].model.toLowerCase() === adjModelKey(a));
+  const adjFieldSpec = (a, key) => { const t = adjTypeOf(a); return t ? ADJUST[t].fields.find((f) => f.key === key) : null; };
+  const adjFieldLabel = (a, key) => (adjFieldSpec(a, key) || {}).label || String(key || "").replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+  const adjValue = (a, key, v) => { const sp = adjFieldSpec(a, key); return sp ? adjShow(sp, v) : (v == null || v === "" ? "—" : String(v)); };
+  const adjReasonLabel = (r) => (ADJUST_REASONS.find((x) => x[0] === String(r).toUpperCase()) || [0, r || "—"])[1];
+  const adjFieldsText = (a) => (a.changes.length ? a.changes.map((c) => adjFieldLabel(a, c.field)).join(", ") : "—");
+  const adjChangeText = (a) => (a.changes.length ? a.changes.map((c) => `${adjValue(a, c.field, c.old_value)} → ${adjValue(a, c.field, c.new_value)}`).join("; ") : "—");
+  function adjRecordLabel(a) {
+    const t = adjTypeOf(a);
+    const rec = t && (state.data[t] || []).find((x) => String(x.id) === String(a.target_id));
+    if (t === "flock" && rec && rec.identifier) return `Flock: ${rec.identifier}`;
+    return `${a.target_model ? a.target_model.split(".").pop() : "Record"} #${a.target_id ?? "?"}`;
+  }
+
+  // The "Adjustment history" block shown at the bottom of a record's View window
+  function adjHistoryHTML(type, id) {
+    const spec = ADJUST[type];
+    if (!spec) return "";
+    const rows = (state.data.adjustment || [])
+      .filter((a) => adjModelKey(a) === spec.model.toLowerCase() && String(a.target_id) === String(id))
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+    const sentence = (a) => {
+      const what = a.changes.length
+        ? a.changes.map((c) => `${adjFieldLabel(a, c.field)} from ${adjValue(a, c.field, c.old_value)} to ${adjValue(a, c.field, c.new_value)}`).join(" and ")
+        : "this record";
+      const why = adjReasonLabel(a.reason) + (a.notes ? ` (${a.notes})` : "");
+      return `On ${a.date ? fmtWhen(a.date) : "an earlier date"}, <b>${esc(a.created_by || "someone")}</b> changed ${esc(what)} because: ${esc(why)}.`;
+    };
+    return `<h3 class="dv-h">Adjustment history</h3>${rows.length
+      ? `<ul class="adj-list">${rows.map((a) => `<li>${sentence(a)}</li>`).join("")}</ul>`
+      : `<p class="empty-line" style="padding:8px 0 0">No adjustments have been made to this record.</p>`}`;
+  }
+
+  // Read-only details for one row of the Adjustments log. No "Adjust" button here
+  // (the adjust argument of openDetailModal is left out on purpose).
+  function openViewAdjustmentModal(id, trigger) {
+    const r = state.data.adjustment.find((x) => String(x.id) === String(id));
+    if (!r) return;
+    const changeRows = r.changes.flatMap((c) => {
+      const sp = adjFieldSpec(r, c.field);
+      const oldV = adjValue(r, c.field, c.old_value);
+      const newV = adjValue(r, c.field, c.new_value);
+      // Text values (for example an expense note) can be long, so they take the full width and wrap.
+      const long = (!!sp && sp.kind === "text") || oldV.length > 40 || newV.length > 40;
+      return [
+        ["Changed field", adjFieldLabel(r, c.field)],
+        ["Old value", oldV, long],
+        ["New value", newV, long],
+      ];
+    });
+    openDetailModal("Adjustment details", `${adjRecordLabel(r)}: complete record of this correction`, [
+      ["Date", r.date ? fmtWhen(r.date) : "—"],
+      ["User", r.created_by || "—"],
+      ...changeRows,
+      ["Notes", r.notes || "—", true],
+    ], null, trigger, null, {
+      stats: [
+        ["Record", adjRecordLabel(r), "records", "neutral"],
+        ["Reason", adjReasonLabel(r.reason), "alert", "amber"],
+      ],
+    });
+  }
+
+  function openAdjustModal(type, id, trigger) {
+    const spec = ADJUST[type];
+    const rec = (state.data[type] || []).find((x) => String(x.id) === String(id));
+    if (!spec || !rec) return;
+    modalTrigger = trigger || document.activeElement;
+
+    const reasonF = { name: "reason", label: "Reason", type: "select", placeholder: "Choose a reason", required: true, options: ADJUST_REASONS };
+    const fieldF = { name: "field", label: "Field to adjust", type: "select", placeholder: "Choose what to correct", required: true, options: spec.fields.map((f) => [f.key, f.label]) };
+    const currentF = { name: "current", label: "Current value", type: "readonly", value: () => "" };
+    const notesF = { name: "notes", label: "Notes", type: "textarea", placeholder: "Explain what went wrong and why you are correcting it", required: true };
+
+    $("#modal-root").innerHTML = `
+      <div class="backdrop" id="backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+          <button class="close" type="button" data-close aria-label="Close">${icon("x", 18)}</button>
+          <h2 id="modal-title">Adjust record</h2>
+          <p class="sub">Correct one value on this ${esc(spec.model.toLowerCase())}. The change is recorded with your reason.</p>
+          <form id="adjust-form" novalidate>
+            <div class="form-grid" id="form-grid">
+              ${fieldHTML(reasonF)}${fieldHTML(fieldF)}${fieldHTML(currentF)}${fieldHTML(adjNew(null))}
+              ${fieldHTML(notesF).replace('class="field"', 'class="field" style="grid-column:1/-1"')}
+            </div>
+            <p class="form-error" id="form-error" role="alert"></p>
+            <div class="actions"><button class="btn" id="save-btn" type="submit" data-label="Save adjustment">Save adjustment</button></div>
+          </form>
+        </div>
+      </div>`;
+    document.body.style.overflow = "hidden";
+    const form = $("#adjust-form");
+    const val = (n) => String(field(form, n).value).trim();
+    const picked = () => spec.fields.find((f) => f.key === val("field"));
+    const oldOf = (sp) => rec[sp.ui];
+
+    form.addEventListener("change", (e) => {
+      if (e.target.id !== "f-field") return;
+      const sp = picked();
+      field(form, "current").value = sp ? adjShow(sp, oldOf(sp)) : "";
+      $('[data-name="new_value"]', form).outerHTML = fieldHTML(adjNew(sp)); // new box of the right kind
+      setError("new_value", "");
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (saving) return;
+      const sp = picked();
+      const defs = [reasonF, fieldF, adjNew(sp), notesF];
+      const raw = val("new_value");
+      const v = { reason: val("reason"), field: val("field"), notes: val("notes"),
+        new_value: sp && ["int", "decimal", "money"].includes(sp.kind) && raw !== "" ? Number(raw) : raw };
+      defs.forEach((d) => setError(d.name, ""));
+      $("#form-error").textContent = "";
+      const errs = validate(v, { fields: defs });
+      if (!errs.new_value && sp) {
+        const same = typeof v.new_value === "number" ? v.new_value === num(oldOf(sp)) : String(v.new_value) === String(oldOf(sp) ?? "");
+        if (same) errs.new_value = "The new value is the same as the current value.";
+      }
+      const bad = defs.map((d) => d.name).filter((n) => errs[n]);
+      if (bad.length) {
+        bad.forEach((n) => setError(n, errs[n]));
+        const el = $("#f-" + bad[0]); if (el) el.focus();
+        return;
+      }
+      const payload = {
+        target_model: spec.model, target_id: rec.id, reason: v.reason, notes: v.notes,
+        changes: [{ field: sp.key, old_value: sp.kind === "text" || sp.kind === "select" ? (oldOf(sp) ?? "") : num(oldOf(sp)), new_value: v.new_value }],
+      };
+      const btn = $("#save-btn"), errEl = $("#form-error");
+      saving = true; btn.disabled = true; btn.textContent = "Saving…";
+      try {
+        await api.adjust(rec, sp, payload);
+        closeModal(); toast("Adjustment saved."); renderView();
+      } catch (err) {
+        let msg = "We couldn't save this adjustment. Please try again.";
+        if (err && err.name === "ApiError") {
+          const entries = Object.entries(err.fields || {});
+          const known = entries.filter(([n]) => n === "reason" || n === "notes");
+          known.forEach(([n, m]) => setError(n, m));
+          const rest = entries.filter((x) => !known.includes(x));
+          msg = rest.length ? rest.map(([n, m]) => `${n}: ${m}`).join(" ") : known.length ? "" : err.message;
+        }
+        errEl.textContent = msg;
+        btn.disabled = false; btn.textContent = btn.dataset.label;
+      } finally {
+        saving = false;
+      }
+    });
+
+    const firstEl = $("select", form);
+    (firstEl || $(".close")).focus();
+  }
+
+  /* ---------- Record a later payment (the "Record Payment" button) ---------- */
+  function openPaymentModal(id, type, trigger) {
+    const kind = PAYMENT_KIND[type];
+    const rec = (state.data[type] || []).find((x) => String(x.id) === String(id));
+    if (!kind || !rec) return;
+    modalTrigger = trigger || document.activeElement;
+    const owed = num(rec.outstanding_balance);
+    const who = rec.customer || rec.supplier || "";
+    const defs = [
+      { name: "amount", label: "Amount", type: "number", placeholder: "Enter amount", required: true, min: 0.01, step: "0.01" },
+      { name: "date", label: "Date", type: "date", required: true },
+      { name: "method", label: "Method", type: "select", placeholder: "Choose a method", required: true, default: "CASH", options: PAYMENT_METHODS },
+      { name: "reference", label: "Reference (optional)", type: "text", placeholder: "Receipt or bank reference" },
+    ];
+    const schema = {
+      fields: defs,
+      errorMap: { payment_method: "method", event_date: "date" },
+      check: (v) => (Math.round(num(v.amount) * 100) > Math.round(owed * 100) ? { amount: `Cannot be more than the amount still owed (${fmtMoney(owed)}).` } : {}),
+    };
+    $("#modal-root").innerHTML = `
+      <div class="backdrop" id="backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+          <button class="close" type="button" data-close aria-label="Close">${icon("x", 18)}</button>
+          <h2 id="modal-title">Record payment</h2>
+          <p class="sub">${esc(who ? who + ": " : "")}${esc(fmtMoney(owed))} still owed. This adds a payment to the original record. It does not create a new one.</p>
+          <form id="payment-form" novalidate>
+            <div class="form-grid" id="form-grid">${defs.map(fieldHTML).join("")}</div>
+            <p class="form-error" id="form-error" role="alert"></p>
+            <div class="actions"><button class="btn" id="save-btn" type="submit" data-label="Save payment">Save payment</button></div>
+          </form>
+        </div>
+      </div>`;
+    document.body.style.overflow = "hidden";
+    const form = $("#payment-form");
+    field(form, "date").value = localISO(new Date());
+    field(form, "method").value = "CASH";
+    const reopen = { sales: openViewSaleModal, purchase: openViewPurchaseModal, expense: openViewExpenseModal }[type];
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (saving) return;
+      const v = readValues(form, schema);
+      defs.forEach((d) => setError(d.name, ""));
+      $("#form-error").textContent = "";
+      const errs = validate(v, schema);
+      const bad = defs.map((d) => d.name).filter((n) => errs[n]);
+      if (bad.length) {
+        bad.forEach((n) => setError(n, errs[n]));
+        const el = $("#f-" + bad[0]); if (el) el.focus();
+        return;
+      }
+      const btn = $("#save-btn"), errEl = $("#form-error");
+      saving = true; btn.disabled = true; btn.textContent = "Saving…";
+      try {
+        await api.recordPayment(type, rec, v);
+        closeModal(); toast("Payment recorded successfully."); renderView();
+        if (reopen) reopen(rec.id, null); // show the record again, now with the new payment in its history
+      } catch (err) {
+        let msg = "We couldn't save this payment. Please try again.";
+        if (err && err.name === "ApiError") {
+          const map = schema.errorMap;
+          const entries = Object.entries(err.fields || {}).map(([k, m]) => [map[k] || k, m]);
+          const known = entries.filter(([n]) => defs.some((d) => d.name === n));
+          const rest = entries.filter((x) => !known.includes(x));
+          known.forEach(([n, m]) => setError(n, m));
+          msg = rest.length ? rest.map(([n, m]) => `${n}: ${m}`).join(" ") : known.length ? "" : err.message;
+        }
+        errEl.textContent = msg;
+        btn.disabled = false; btn.textContent = btn.dataset.label;
+      } finally {
+        saving = false;
+      }
+    });
+
+    const firstEl = $("input:not([readonly]):not([type=date])", form);
+    (firstEl || $(".close")).focus();
+  }
+
+  /* ---------- Step 1 of "Create farm": choose the farm type ---------- */
+  function openFarmTypeStep(trigger) {
+    modalTrigger = trigger || document.activeElement;
+    const origin = modalTrigger;
+    $("#modal-root").innerHTML = `
+      <div class="backdrop" id="backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+          <button class="close" type="button" data-close aria-label="Close">${icon("x", 18)}</button>
+          <h2 id="modal-title">What do you farm?</h2>
+          <p class="sub">Choose your farm type. We set up your records to match it.</p>
+          <div class="control type-search"><input id="type-search" type="search" placeholder="Search farm types, for example poultry or cocoa" aria-label="Search farm types" autocomplete="off"></div>
+          <div id="type-list"></div>
+          <p class="type-note" id="type-note" role="status" hidden></p>
+        </div>
+      </div>`;
+    document.body.style.overflow = "hidden";
+    const listEl = $("#type-list"), noteEl = $("#type-note"), search = $("#type-search");
+    let picked = "";
+    const draw = () => {
+      const q = search.value.trim().toLowerCase();
+      const hits = FARM_CATALOG.filter((t) => !q || `${t.title} ${t.group} ${t.keywords}`.toLowerCase().includes(q));
+      if (!hits.length) { listEl.innerHTML = `<div class="empty-line">No farm type matches "${esc(search.value.trim())}". More types are on the way.</div>`; return; }
+      const groups = [...new Set(hits.map((t) => t.group))];
+      listEl.innerHTML = groups.map((g) => `<p class="type-group">${esc(g)}</p><div class="type-cards">${hits.filter((t) => t.group === g).map((t) =>
+        `<button type="button" class="type-card${t.ready ? "" : " soon"}${t.value === picked ? " on" : ""}" data-type="${esc(t.value)}"><b>${esc(t.title)}</b><small>${esc(t.desc)}</small><span class="type-badge">${t.ready ? "Available now" : "Coming soon"}</span></button>`).join("")}</div>`).join("");
+    };
+    draw();
+    search.addEventListener("input", draw);
+    listEl.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-type]");
+      const t = b && FARM_CATALOG.find((x) => x.value === b.dataset.type);
+      if (!t) return;
+      if (t.ready) { openModal("farm", origin, { farm_type: t.value, farm_type_label: t.title }); return; }
+      picked = t.value;
+      draw();
+      const again = $(`[data-type="${t.value}"]`, listEl);
+      if (again) again.focus();
+      noteEl.textContent = `${t.title} is coming soon. AgroFlow starts with egg production farms, so choose Egg production to get set up today. We will open ${t.title.toLowerCase()} in a future update.`;
+      noteEl.hidden = false;
+    });
+    search.focus();
+  }
+
+  // preset (optional): { farm_type, farm_type_label } chosen in step 1 of "Create farm"
+  function openModal(type, trigger, preset) {
     const base = SCHEMAS[type];
     let tabKey = base.tabs ? base.tabs[0].key : null;
     const cur = () => effective(base, tabKey);
@@ -946,6 +1644,7 @@
         <div class="modal${base.centered ? " center" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title">
           <button class="close" type="button" data-close aria-label="Close">${icon("x", 18)}</button>
           <h2 id="modal-title">${esc(base.title)}</h2><p class="sub">${esc(base.sub)}</p>
+          ${preset && preset.farm_type_label ? `<p class="type-chip">Farm type: <b>${esc(preset.farm_type_label)}</b><button type="button" class="link-btn" data-change-type>Change</button></p>` : ""}
           ${tabsHTML}
           <form id="record-form" novalidate>
             <div class="form-grid" id="form-grid"></div>
@@ -958,6 +1657,9 @@
     document.body.style.overflow = "hidden";
     const form = $("#record-form");
     const tabsEl = $("#modal-tabs");
+    const origin = modalTrigger;
+    const changeBtn = $("[data-change-type]");
+    if (changeBtn) changeBtn.addEventListener("click", () => openFarmTypeStep(origin)); // back to step 1
 
     function mountFields(keepDate) {
       const s = cur();
@@ -967,7 +1669,7 @@
         const def = fieldOf(s, i.name);
         i.value = keepDate !== undefined && i.name === "date" ? keepDate : def && def.noDefault ? "" : today;
       });
-      allFields(s).forEach((f) => { if (f.default && form.elements[f.name]) form.elements[f.name].value = f.default; });
+      allFields(s).forEach((f) => { if (f.default && field(form, f.name)) field(form, f.name).value = f.default; });
       $("#form-error").textContent = "";
       refreshComputed(form, s);
     }
@@ -988,7 +1690,7 @@
         if (el) el.focus();
         return;
       }
-      const clean = rr ? { ...res.clean, rows: rr.rows } : res.clean;
+      const clean = { ...res.clean, ...(preset ? { farm_type: preset.farm_type } : {}), ...(rr ? { rows: rr.rows } : {}) };
       if (base.tabs) showReview(clean, s); // "Next" -> review step
       else save(type, clean, s, $("#save-btn"), $("#form-error"));
     });
@@ -997,7 +1699,7 @@
       tabsEl.addEventListener("click", (e) => {
         const b = e.target.closest("[data-mtab]");
         if (!b || b.dataset.mtab === tabKey) return;
-        const date = form.elements.date ? form.elements.date.value : undefined;
+        const date = field(form, "date") ? field(form, "date").value : undefined;
         tabKey = b.dataset.mtab;
         $$("[data-mtab]", tabsEl).forEach((x) => x.setAttribute("aria-selected", String(x === b)));
         mountFields(date);
@@ -1030,7 +1732,7 @@
   function readValues(form, s) {
     const v = {};
     allFields(s).forEach((f) => {
-      const el = form.elements[f.name];
+      const el = field(form, f.name);
       if (!el) return;
       let val = String(el.value).trim();
       if (f.type === "number") val = val === "" ? "" : Number(val);
@@ -1043,7 +1745,7 @@
     const v = readValues(form, s);
     const calc = s.calc ? s.calc(v) : {};
     s.fields.forEach((f) => {
-      if (f.type === "computed" && form.elements[f.name]) form.elements[f.name].value = f.fmt(calc[f.name] ?? 0);
+      if (f.type === "computed" && field(form, f.name)) field(form, f.name).value = f.fmt(calc[f.name] ?? 0);
       if (f.reveal) $("#r-" + f.reveal.name).hidden = !f.reveal.when(v);
     });
   }
@@ -1207,6 +1909,15 @@
     switch (act.dataset.action) {
       case "add-record": openModal(act.dataset.type, act); break;
       case "add-existing": openModal("opening", act); break;
+      case "view-flock": openViewFlockModal(act.dataset.id, act); break;
+      case "adjust-record": openAdjustModal(act.dataset.rtype, act.dataset.id, act); break;
+      case "record-payment": openPaymentModal(act.dataset.id, act.dataset.rtype, act); break;
+      case "view-production": openViewProductionModal(act.dataset.id, act); break;
+      case "view-activity": openViewActivityModal(act.dataset.id, act); break;
+      case "view-purchase": openViewPurchaseModal(act.dataset.id, act); break;
+      case "view-sale": openViewSaleModal(act.dataset.id, act); break;
+      case "view-expense": openViewExpenseModal(act.dataset.id, act); break;
+      case "view-adjustment": openViewAdjustmentModal(act.dataset.id, act); break;
       case "skip-opening":
         // Only hides the card for this farm; no data is deleted or locked.
         try { localStorage.setItem(skipKey(), "1"); } catch { /* storage unavailable */ }
@@ -1216,7 +1927,7 @@
         // opened from the farm dropdown: close it first and return focus to the farm button
         const fromMenu = act.closest(".menu");
         closeMenus();
-        openModal("farm", fromMenu ? $("#farm-btn") : act);
+        openFarmTypeStep(fromMenu ? $("#farm-btn") : act);
         break;
       }
       case "go-dashboard": location.hash = "#/dashboard"; break;
@@ -1224,7 +1935,7 @@
       case "export-records": exportRecords(act.dataset.type); break;
       case "export-dashboard": exportDashboard(); break;
       case "review-flock": location.hash = "#/records/flock"; break;
-      case "view-all": location.hash = "#/records/production"; break;
+      case "view-all": location.hash = "#/records/" + (hasEggs() ? "production" : "flock"); break;
       case "switch-farm":
         closeMenus();
         if (act.dataset.id !== state.farmId) { state.farmId = act.dataset.id; boot(); }
@@ -1286,11 +1997,80 @@
     }, 150);
   });
 
-  window.addEventListener("hashchange", () => { state.query = ""; const s = $("#search"); if (s) s.value = ""; renderView(); window.scrollTo(0, 0); });
+  window.addEventListener("hashchange", () => {
+    state.query = ""; const s = $("#search"); if (s) s.value = "";
+    renderView(); window.scrollTo(0, 0);
+    // Opening a Records tab pulls fresh rows for that tab from the server
+    const { page, sub } = route();
+    if (page === "records" && state.status === "ready" && !DEV) {
+      const type = pickTab(sub);
+      api.refresh(type)
+        .then(() => { if (route().page === "records" && state.status === "ready") renderView(); })
+        .catch(() => { /* keep showing what we already have */ });
+    }
+  });
 
   /* =====================================================================
      START
      ===================================================================== */
+  // Styles for the farm type step. They live here so this feature works without touching the CSS file;
+  // move them into your stylesheet whenever you like.
+  (function injectStyles() {
+    const st = document.createElement("style");
+    st.textContent = `
+      .type-search { margin: 16px 0 0; }
+      .modal .type-group { margin: 20px 0 8px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #6b6b6b; }
+      .type-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+      button.type-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 14px; font: inherit; color: inherit; background: #fff; border: 1.5px solid var(--line, #e3e3e3); border-radius: 12px; cursor: pointer; transition: border-color .15s, background .15s; }
+      .type-card b { font-size: 14px; font-weight: 600; }
+      .type-card small { font-size: 12px; line-height: 1.4; color: #6b6b6b; font-weight: 400; }
+      .type-card:hover { border-color: #9fc9ad; }
+      .type-card:focus-visible { outline: 2px solid #147a3a; outline-offset: 2px; }
+      .type-card.soon { background: #fafafa; }
+      .type-card.soon b { color: #5f5f5f; }
+      .type-card.on { border-color: #147a3a; background: #eef7f1; }
+      .type-badge { margin-top: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600; border-radius: 999px; background: #e3f2e8; color: #147a3a; }
+      .type-card.soon .type-badge { background: #efefef; color: #666; }
+      .modal .type-note { margin: 16px 0 0; padding: 12px 14px; font-size: 13px; line-height: 1.5; color: #5c4a12; background: #fff8e6; border: 1px solid #f3dca0; border-radius: 10px; }
+      .type-chip { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; font-size: 13px; color: #555; }
+      .type-chip b { color: #147a3a; font-weight: 600; }
+      .adj-list { margin: 8px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.6; color: #444; }
+      .adj-list li + li { margin-top: 6px; }
+      .mini-lines { margin-top: 8px; border: 1px solid var(--line, #e3e3e3); border-radius: 10px; overflow-x: auto; }
+      .mini-lines table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      .mini-lines th, .mini-lines td { padding: 8px 12px; text-align: left; white-space: nowrap; }
+      .mini-lines th.num, .mini-lines td.num { text-align: right; }
+      .mini-lines thead th { font-weight: 600; color: #6b6b6b; border-bottom: 1px solid var(--line, #e3e3e3); }
+      .modal .dv-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding-right: 36px; }
+      .modal .dv-head h2 { margin: 0; }
+      .dv-badge { padding: 3px 11px; font-size: 12px; font-weight: 600; border-radius: 999px; background: #efefef; color: #555; }
+      .dv-badge.ok { background: #e3f2e8; color: #147a3a; }
+      .dv-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 18px 0 0; }
+      .dv-stat { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px; background: #fff; border: 1px solid var(--line, #e3e3e3); border-radius: 14px; }
+      .dv-stat { border-left: 4px solid #d6d9d6; }
+      .dv-stat.green { border-left-color: #147a3a; }
+      .dv-stat.amber { border-left-color: #f3b93a; }
+      .dv-stat.red { border-left-color: #c0392b; }
+      .dv-st { min-width: 0; }
+      .dv-st small { display: block; font-size: 12px; color: #6b6b6b; }
+      .dv-st b { display: block; margin-top: 2px; font-size: 18px; font-weight: 600; line-height: 1.25; color: #1a1a1a; overflow-wrap: anywhere; }
+      .modal .dv-h { margin: 24px 0 10px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #6b6b6b; text-align: left; }
+      .dv-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 24px; margin: 0; padding: 16px 18px; background: #fafcfa; border: 1px solid var(--line, #e3e3e3); border-radius: 14px; }
+      .dv-item dt { font-size: 12px; font-weight: 500; color: #6b6b6b; }
+      .dv-item dd { margin: 3px 0 0; font-size: 14px; font-weight: 500; line-height: 1.45; color: #1a1a1a; overflow-wrap: anywhere; }
+      .dv-item dd.dv-empty { font-weight: 400; color: #a3a3a3; }
+      .dv-item.dv-long { grid-column: 1 / -1; }
+      .dv-item.dv-long dd { white-space: pre-wrap; font-weight: 400; }
+      .modal .adj-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      .modal .adj-list li { margin: 0; padding: 10px 14px; font-size: 13px; line-height: 1.55; color: #3d3d3d; background: #f6faf7; border-left: 3px solid #147a3a; border-radius: 8px; }
+      .dv-meta { margin: 20px 0 0; font-size: 12px; color: #8a8a8a; }
+      @media (max-width: 640px) { .dv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+      @media (max-width: 420px) { .dv-grid { grid-template-columns: minmax(0, 1fr); } }
+      td.trunc { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    `;
+    document.head.appendChild(st);
+  })();
+
   renderShell();
   boot();
 })();
