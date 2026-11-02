@@ -293,6 +293,8 @@
       id: p.id, flock: p.flock, date: p.event_date,
       collected: n(p.quantity_collected), damaged: n(p.quantity_damaged), saleable: n(p.quantity_saleable),
       notes: p.notes || "",
+      // How the eggs were packed (Loose eggs, Trays, Crates). The server stores it in "unit".
+      packaging: unitOf(p.unit != null ? p.unit : (p.packaging != null ? p.packaging : p.packaging_unit)),
       recorded_by: p.created_by_name || "", created_at: p.created_at, created_by: p.created_by_name || ""
     };
   };
@@ -309,9 +311,14 @@
   // Server decimals arrive as strings ("150.00"); the UI works with numbers.
   // The server calls the date "event_date"; the UI calls it "date".
   // A sale on the server is a customer ("party") plus one or more line items, each with an item,
-  // quantity, unit price and total. The table shows one row per sale, so lines are summed up here.
+  // quantity, unit, unit price and total. The table shows one row per sale, so lines are summed up here.
   const idOf = function (v) { return v && typeof v === "object" ? v.id : v; };
   const nameOf = function (v) { return v && typeof v === "object" ? (v.name || "") : ""; };
+  // A line's unit may arrive as a plain string ("Crate") or, on some backends, as an object with a name.
+  const unitOf = function (v) {
+    if (v && typeof v === "object") return v.name || v.abbreviation || "";
+    return v == null ? "" : String(v);
+  };
   // Payment fields shared by sales, purchases and expenses. If the server did not send an
   // outstanding balance, work it out from the total and the amount paid.
   const paymentOf = function (x, total) {
@@ -339,7 +346,7 @@
     const lines = (Array.isArray(x.lines) ? x.lines : []).map(function (l) {
       return {
         item: idOf(l.item), item_name: l.item_name || nameOf(l.item),
-        quantity: n(l.quantity), unit_price: n(l.unit_price), total: n(l.total)
+        quantity: n(l.quantity), unit: unitOf(l.unit), unit_price: n(l.unit_price), total: n(l.total)
       };
     });
     const sum = function (k) { return lines.reduce(function (t, l) { return t + l[k]; }, 0); };
@@ -353,7 +360,7 @@
       lines: lines,
       product: lines.map(function (l) { return l.item_name; }).filter(Boolean).join(", ") || (typeof x.product === "string" ? x.product : ""),
       quantity: lines.length ? sum("quantity") : n(x.quantity),
-      unit: x.unit || "",
+      unit: (lines.length && lines[0].unit) || unitOf(x.unit),
       price: lines.length ? lines[0].unit_price : n(x.price),
       discount_type: String(x.discount_type || "FIXED").toUpperCase(),
       discount_value: n(x.discount_value),
@@ -371,7 +378,7 @@
     const lines = (Array.isArray(x.lines) ? x.lines : []).map(function (l) {
       return {
         item: idOf(l.item), item_name: l.item_name || nameOf(l.item),
-        quantity: n(l.quantity), unit_price: n(l.unit_price), total: n(l.total)
+        quantity: n(l.quantity), unit: unitOf(l.unit), unit_price: n(l.unit_price), total: n(l.total)
       };
     });
     const sum = function (k) { return lines.reduce(function (t, l) { return t + l[k]; }, 0); };
@@ -384,7 +391,7 @@
       lines: lines,
       item: lines.map(function (l) { return l.item_name; }).filter(Boolean).join(", ") || (typeof x.item === "string" ? x.item : ""),
       quantity: lines.length ? sum("quantity") : n(x.quantity),
-      unit: x.unit || "",
+      unit: (lines.length && lines[0].unit) || unitOf(x.unit),
       unit_cost: lines.length ? lines[0].unit_price : n(x.unit_cost),
       total_cost: totalCost,
       amount_paid: pay.amount_paid,
@@ -531,6 +538,8 @@
         quantity_damaged: v.damaged === "" || v.damaged == null ? 0 : Number(v.damaged),
         quantity_saleable: Number(v.saleable),
         event_date: v.date,
+        // How the eggs were packed (Loose eggs, Trays, Crates). Saved on the record as "unit".
+        unit: v.packaging || "Loose eggs",
         classification: "LIVE"
       };
       if (v.notes) body.notes = String(v.notes).trim();
@@ -556,19 +565,22 @@
       return {
         event_date: v.date,
         party: await customerIdFor(farmId, v.customer),
+        // The discount and the amount paid are sent at the top level of the payload, not inside the line.
+        discount_type: v.discount_type === "PERCENT" ? "PERCENT" : "FIXED",
+        discount_value: money(orZero(v.discount_value)),
+        amount_paid: money(orZero(v.amount_paid)),
+        notes: v.notes ? String(v.notes).trim() : "",
         lines: [
           {
             item: Number(v.product),
             quantity: money(v.quantity),
+            // The unit the goods were sold in (Crate, Tray, Egg, Bag, Kg). It belongs to the line.
+            unit: v.unit || "",
             unit_price: money(v.price),
-            // The line is the full price before the discount. The discount is sent separately below.
+            // The line is the full price before the discount. The discount is sent separately above.
             total: money(orZero(v.quantity) * orZero(v.price))
           }
-        ],
-        discount_type: v.discount_type === "PERCENT" ? "PERCENT" : "FIXED",
-        discount_value: money(orZero(v.discount_value)),
-        amount_paid: money(orZero(v.amount_paid)),
-        notes: v.notes ? String(v.notes).trim() : ""
+        ]
       };
     }
     if (type === "purchase") {
@@ -581,16 +593,18 @@
       return {
         event_date: v.date,
         party: await supplierIdFor(farmId, v.supplier),
+        amount_paid: money(orZero(v.amount_paid)),
+        notes: v.stock_received ? String(v.stock_received).trim() : "",
         lines: [
           {
             item: itemId,
             quantity: money(v.quantity),
+            // The unit the goods were bought in (Bag, Bottle, Kg ...). It belongs to the line.
+            unit: v.unit || "",
             unit_price: money(v.unit_cost),
             total: money(v.total_cost)
           }
-        ],
-        amount_paid: money(orZero(v.amount_paid)),
-        notes: v.stock_received ? String(v.stock_received).trim() : ""
+        ]
       };
     }
     if (type === "expense") {

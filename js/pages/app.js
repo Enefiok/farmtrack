@@ -338,6 +338,9 @@
   const flockName = (id) => (findFlock(id) || {}).identifier || "—";
   const list = (...a) => a;
   const UNITS = list("Egg", "Tray", "Crate", "Bird", "Bag", "Kg", "Litre", "Piece");
+  // Units offered on the Sales form (what the goods are sold in) and on the Purchase form (what they are bought in).
+  const SALE_UNITS = [["Crate", "Crate"], ["Tray", "Tray"], ["Egg", "Egg"], ["Bag", "Bag"], ["Kg", "Kg"]];
+  const PURCHASE_UNITS = [["Bag", "Bag"], ["Bottle", "Bottle"], ["Kg", "Kg"], ["Litre", "Litre"], ["Crate", "Crate"], ["Tray", "Tray"], ["Piece", "Piece"]];
   const fieldOf = (s, name) => allFields(s).find((f) => f.name === name);
   const unitQty = (r) => `${fmtInt(r.quantity)}${r.unit ? " " + r.unit : ""}`;
 
@@ -423,15 +426,16 @@
     },
     production: {
       title: "Production Records", sub: "Record eggs collected from a flock", saved: "Production record saved.",
-      errorMap: { quantity_collected: "collected", quantity_damaged: "damaged", quantity_saleable: "saleable", event_date: "date" },
+      errorMap: { quantity_collected: "collected", quantity_damaged: "damaged", quantity_saleable: "saleable", event_date: "date", unit: "packaging" },
       fields: [
         { name: "date", label: "Egg Collection Date", type: "date", required: true },
         { name: "flock", label: "Flock", type: "select", placeholder: "Enter flock", emptyText: "Add a flock first", required: true, options: flockOptions },
         { name: "collected", label: "Eggs Collected", type: "number", placeholder: "Enter amount of eggs", required: true, min: 0, integer: true },
         { name: "damaged", label: "Damaged/Broken Eggs", type: "number", placeholder: "Enter broken eggs", min: 0, integer: true },
         { name: "saleable", label: "Saleable Quantity", type: "computed", fmt: (v) => fmtInt(v) },
-        { name: "packaging", label: "Packaging/Unit Conversions", type: "select", placeholder: "Enter unit", required: true, options: list("Loose eggs", "Trays", "Crates"),
-          reveal: { name: "eggs_per_unit", label: "Eggs per tray/crate", type: "number", placeholder: "Enter your own count", min: 1, integer: true, required: true, when: (v) => v.packaging === "Trays" || v.packaging === "Crates" } },
+        // How the eggs were packed. Sent to the backend as "unit". Unit conversions (eggs per tray or crate)
+        // are set on the Item, not typed on every record.
+        { name: "packaging", label: "Packaging/Unit Conversions", type: "select", placeholder: "Enter unit", required: true, options: list("Loose eggs", "Trays", "Crates") },
         { name: "recorded_by", label: "Recorded by", type: "readonly", value: () => state.user.name },
         { name: "notes", label: "Notes", type: "textarea", placeholder: "Write Something" },
       ],
@@ -447,6 +451,8 @@
         { name: "customer", label: "Customer", type: "text", placeholder: "Enter or choose a customer", required: true, suggest: () => state.lookups.customers.map((c) => c.name) },
         { name: "product", label: "Product", type: "select", placeholder: "Enter product", emptyText: "No products yet. Record egg production first.", required: true, options: () => state.lookups.items.map((i) => [i.id, i.name]) },
         { name: "quantity", label: "Quantities", type: "number", placeholder: "Enter quantity", required: true, min: 0.01 },
+        // What the goods are sold in. Sent inside the sale line.
+        { name: "unit", label: "Unit", type: "select", placeholder: "Select unit", required: true, options: SALE_UNITS },
         { name: "price", label: "Prices", type: "number", placeholder: "Enter price", required: true, min: 0, step: "0.01" },
         { name: "discount_type", label: "Discount Type", type: "select", default: "FIXED", options: [["FIXED", "Fixed Amount"], ["PERCENT", "Percentage (%)"]] },
         { name: "discount_value", label: "Discount Value", type: "number", placeholder: "0", min: 0, step: "0.01" },
@@ -477,6 +483,8 @@
         { name: "supplier", label: "Supplier", type: "text", placeholder: "Enter or choose a supplier", required: true, suggest: () => (state.lookups.suppliers || []).map((s) => s.name) },
         { name: "item", label: "Item", type: "select", placeholder: "Enter item", emptyText: "No items yet. Add an item on the server first.", required: true, options: () => state.lookups.items.map((i) => [i.id, i.name]) },
         { name: "quantity", label: "Quantity", type: "number", placeholder: "Enter quantity", required: true, min: 0.01 },
+        // What the goods are bought in (for example Bags of feed or Bottles of medicine). Sent inside the purchase line.
+        { name: "unit", label: "Unit", type: "select", placeholder: "Select unit", required: true, options: PURCHASE_UNITS },
         { name: "unit_cost", label: "Unit Cost", type: "number", placeholder: "Enter unit cost", required: true, min: 0, step: "0.01" },
         { name: "total_cost", label: "Total Cost", type: "computed", fmt: fmtMoney },
         { name: "amount_paid", label: "Amount Paid Now", type: "number", placeholder: "0.00", min: 0, step: "0.01" },
@@ -586,7 +594,8 @@
      ===================================================================== */
   const COLS = {
     flock: [["Identifier", (r) => r.identifier], ["Breed/Type", (r) => r.breed], ["Arrival date", (r) => fmtDate(r.arrival_date)], ["Starting count", (r) => fmtInt(r.starting_count), 1], ["Current count", (r) => fmtInt(r.current_count), 1], ["Stage", (r) => r.stage], ["Status", (r) => r.status]],
-    production: [["Date", (r) => fmtDate(r.date)], ["Flock", (r) => flockName(r.flock)], ["Collected", (r) => fmtInt(r.collected), 1], ["Damaged", (r) => fmtInt(r.damaged || 0), 1], ["Saleable", (r) => fmtInt(r.saleable), 1], ["Recorded by", (r) => r.recorded_by]],
+    // The egg counts are numbers of eggs. The packaging (Loose eggs, Trays, Crates) is shown next to the saleable number.
+    production: [["Date", (r) => fmtDate(r.date)], ["Flock", (r) => flockName(r.flock)], ["Collected", (r) => fmtInt(r.collected), 1], ["Damaged", (r) => fmtInt(r.damaged || 0), 1], ["Saleable", (r) => fmtInt(r.saleable) + (r.packaging ? " " + r.packaging : ""), 1], ["Recorded by", (r) => r.recorded_by]],
     sales: [["Date", (r) => fmtDate(r.date)], ["Customer", (r) => r.customer], ["Product", (r) => r.product], ["Quantity", (r) => unitQty(r), 1], ["Total", (r) => fmtMoney(r.total), 1], ["Outstanding", (r) => fmtMoney(r.outstanding_balance || 0), 1]],
     purchase: [["Date", (r) => fmtDate(r.date)], ["Supplier", (r) => r.supplier], ["Item", (r) => r.item], ["Quantity", (r) => unitQty(r), 1], ["Total cost", (r) => fmtMoney(r.total_cost), 1], ["Outstanding", (r) => fmtMoney(r.outstanding_balance || 0), 1]],
     expense: [["Date", (r) => fmtDate(r.date)], ["Supplier", (r) => r.supplier || "—"], ["Description", (r) => r.description], ["Amount", (r) => fmtMoney(r.amount), 1], ["Outstanding", (r) => fmtMoney(r.outstanding_balance || 0), 1]],
@@ -601,7 +610,7 @@
   const rowBtns = (view, type) => (r) => `<span style="display:inline-flex;gap:6px;align-items:center">${view(r)}${pencilBtn(type)(r)}</span>`;
   const ROW_ACTIONS = {
     flock: rowBtns(viewBtn("view-flock"), "flock"),
-    production: viewBtn("view-production"),
+    production: rowBtns(viewBtn("view-production"), "production"),
     activity: viewBtn("view-activity"),
     sales: rowBtns(viewBtn("view-sale"), "sales"),
     purchase: rowBtns(viewBtn("view-purchase"), "purchase"),
@@ -880,8 +889,18 @@
       </div>`;
   }
 
+  // Newest first: by when the record was created, then by its date, then by id.
+  const newestFirst = (rows) => rows.slice().sort((a, b) => {
+    const ta = new Date(a.created_at || 0).getTime() || 0;
+    const tb = new Date(b.created_at || 0).getTime() || 0;
+    if (tb !== ta) return tb - ta;
+    const byDate = String(b.date || "").localeCompare(String(a.date || ""));
+    if (byDate) return byDate;
+    return num(b.id) - num(a.id);
+  });
+
   function recordsView(type) {
-    const rows = state.data[type];
+    const rows = newestFirst(state.data[type]);
     const cols = COLS[type];
     const q = state.query.trim().toLowerCase();
     const cells = (r) => cols.map(([, fn]) => String(fn(r) ?? ""));
@@ -1144,7 +1163,7 @@
 
   // Read-only data is shown as plain text (label above value), not as greyed-out input boxes.
   // rows: [[label, value, long?]]. "long" items take the full width and wrap (notes, long old/new values).
-  // lines (optional): [{ name, quantity, unit_price, total }]
+  // lines (optional): [{ name, quantity, unit, unit_price, total }]
   // adjust (optional): { type, id } adds the "Adjustment history" block and the Adjust button.
   // summary (optional): { badge: [text, tone], stats: [[label, value], ...] } is a headline strip at the top.
   // pay (optional): { type, id, payments, outstanding } adds the "Payment history" block and the "Record Payment" button.
@@ -1159,7 +1178,12 @@
     });
     const items = main
       .filter(([label, value, long]) => !(long && !hasVal(value) && (label === "Notes" || label === "Details")))
-      .map(([label, value, long]) => `<div class="dv-item${long ? " dv-long" : ""}"><dt>${esc(label)}</dt><dd${hasVal(value) ? "" : ' class="dv-empty"'}>${esc(hasVal(value) ? value : "—")}</dd></div>`)
+      .map(([label, value, long]) => {
+        const has = hasVal(value);
+        // Long text (notes, details) is cut to a few lines, with a "Show more" button.
+        const clamp = long && has && (String(value).length > 140 || String(value).split("\n").length > 3);
+        return `<div class="dv-item${long ? " dv-long" : ""}"><dt>${esc(label)}</dt><dd class="${has ? "" : "dv-empty"}${clamp ? " dv-clamp" : ""}">${esc(has ? value : "—")}</dd>${clamp ? `<button type="button" class="link-btn dv-more" data-action="toggle-note" aria-expanded="false">Show more</button>` : ""}</div>`;
+      })
       .join("");
     const badge = summary && summary.badge ? `<span class="dv-badge ${esc(summary.badge[1] || "")}">${esc(summary.badge[0])}</span>` : "";
     // Each KPI card is [label, value, iconName, tone]. Tones: green | amber | red | neutral.
@@ -1168,10 +1192,11 @@
     const by = hasVal(meta["Created By"]) ? meta["Created By"] : "";
     const at = hasVal(meta["Created At"]) ? meta["Created At"] : "";
     const footer = by || at ? `<p class="dv-meta">Created${by ? " by " + esc(by) : ""}${at ? " · " + esc(at) : ""}</p>` : "";
+    // The quantity is shown with its unit next to it, for example "67 Crate".
     const linesHTML = lines ? `<h3 class="dv-h">Items</h3>
       <div class="table-wrap mini-lines"><table><thead><tr><th>Item</th><th class="num">Quantity</th><th class="num">Unit price</th><th class="num">Total</th></tr></thead><tbody>${
         lines.length
-          ? lines.map((l) => `<tr><td>${esc(l.name || "—")}</td><td class="num">${esc(fmtQty(l.quantity))}</td><td class="num">${esc(fmtMoney(l.unit_price))}</td><td class="num">${esc(fmtMoney(l.total))}</td></tr>`).join("")
+          ? lines.map((l) => `<tr><td>${esc(l.name || "—")}</td><td class="num">${esc(fmtQty(l.quantity) + (l.unit ? " " + l.unit : ""))}</td><td class="num">${esc(fmtMoney(l.unit_price))}</td><td class="num">${esc(fmtMoney(l.total))}</td></tr>`).join("")
           : `<tr><td colspan="4">No items recorded.</td></tr>`}</tbody></table></div>` : "";
     $("#modal-root").innerHTML = `
       <div class="backdrop" id="backdrop">
@@ -1220,10 +1245,11 @@
     openDetailModal("Production details", `${flockName(r.flock)}: complete record for this egg collection`, [
       ["Egg Collection Date", fmtDate(r.date)],
       ["Flock", flockName(r.flock)],
+      ["Packaging/Unit", r.packaging || "—"],
       ["Recorded by", r.recorded_by || "—"],
       ["Created At", r.created_at ? fmtWhen(r.created_at) : "—"],
       ["Notes", r.notes || "—", true],
-    ], null, trigger, null, {
+    ], null, trigger, { type: "production", id: r.id }, {
       stats: [
         ["Collected", fmtInt(r.collected), "egg", "green"],
         ["Damaged", fmtInt(r.damaged || 0), "alert", num(r.damaged) > 0 ? "amber" : "neutral"],
@@ -1249,8 +1275,8 @@
     const r = state.data.purchase.find((x) => String(x.id) === String(id));
     if (!r) return;
     // Records without lines (demo data) show one line built from the row itself
-    const lines = (Array.isArray(r.lines) && r.lines.length ? r.lines : [{ item_name: r.item, quantity: r.quantity, unit_price: r.unit_cost, total: r.total_cost }])
-      .map((l) => ({ name: itemNameOf(l), quantity: l.quantity, unit_price: l.unit_price, total: l.total }));
+    const lines = (Array.isArray(r.lines) && r.lines.length ? r.lines : [{ item_name: r.item, quantity: r.quantity, unit: r.unit, unit_price: r.unit_cost, total: r.total_cost }])
+      .map((l) => ({ name: itemNameOf(l), quantity: l.quantity, unit: l.unit || "", unit_price: l.unit_price, total: l.total }));
     openDetailModal("Purchase details", `${r.supplier || "Purchase"}: complete record for this purchase`, [
       ["Supplier", r.supplier || "—"],
       ["Date", fmtDate(r.date)],
@@ -1268,8 +1294,8 @@
   function openViewSaleModal(id, trigger) {
     const r = state.data.sales.find((x) => String(x.id) === String(id));
     if (!r) return;
-    const lines = (Array.isArray(r.lines) && r.lines.length ? r.lines : [{ item_name: r.product, quantity: r.quantity, unit_price: r.price, total: r.total }])
-      .map((l) => ({ name: itemNameOf(l), quantity: l.quantity, unit_price: l.unit_price, total: l.total }));
+    const lines = (Array.isArray(r.lines) && r.lines.length ? r.lines : [{ item_name: r.product, quantity: r.quantity, unit: r.unit, unit_price: r.price, total: r.total }])
+      .map((l) => ({ name: itemNameOf(l), quantity: l.quantity, unit: l.unit || "", unit_price: l.unit_price, total: l.total }));
     openDetailModal("Sale details", `${r.customer || "Sale"}: complete record for this sale`, [
       ["Customer", r.customer || "—"],
       ["Date", fmtDate(r.date)],
@@ -1335,6 +1361,11 @@
       { key: "quantity", ui: "quantity", label: "Quantity", kind: "decimal" },
       { key: "unit_price", ui: "price", label: "Unit price", kind: "money" },
       { key: "total_amount", ui: "total", label: "Total sale value", kind: "money" },
+    ] },
+    production: { model: "Production", fields: [
+      { key: "quantity_collected", ui: "collected", label: "Eggs collected", kind: "int" },
+      { key: "quantity_damaged", ui: "damaged", label: "Damaged/broken eggs", kind: "int" },
+      { key: "quantity_saleable", ui: "saleable", label: "Saleable quantity", kind: "int" },
     ] },
     expense: { model: "Expense", fields: [
       { key: "amount", ui: "amount", label: "Amount", kind: "money" },
@@ -1864,7 +1895,7 @@
   }
 
   function exportRecords(type) {
-    const rows = state.data[type];
+    const rows = newestFirst(state.data[type]);
     if (!rows.length) { toast("There are no records to export yet."); return; }
     downloadCSV(type, [COLS[type].map((c) => c[0]), ...rows.map((r) => COLS[type].map(([, fn]) => fn(r)))]);
   }
@@ -1917,6 +1948,13 @@
       case "view-purchase": openViewPurchaseModal(act.dataset.id, act); break;
       case "view-sale": openViewSaleModal(act.dataset.id, act); break;
       case "view-expense": openViewExpenseModal(act.dataset.id, act); break;
+      case "toggle-note": {
+        const dd = act.previousElementSibling; // the note text sits just before the button
+        const open = dd.classList.toggle("dv-open");
+        act.textContent = open ? "Show less" : "Show more";
+        act.setAttribute("aria-expanded", String(open));
+        break;
+      }
       case "view-adjustment": openViewAdjustmentModal(act.dataset.id, act); break;
       case "skip-opening":
         // Only hides the card for this farm; no data is deleted or locked.
@@ -2060,6 +2098,8 @@
       .dv-item dd { margin: 3px 0 0; font-size: 14px; font-weight: 500; line-height: 1.45; color: #1a1a1a; overflow-wrap: anywhere; }
       .dv-item dd.dv-empty { font-weight: 400; color: #a3a3a3; }
       .dv-item.dv-long { grid-column: 1 / -1; }
+      .dv-item dd.dv-clamp:not(.dv-open) { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+      .dv-more { margin-top: 4px; padding: 0; font-size: 12px; font-weight: 600; color: #147a3a; }
       .dv-item.dv-long dd { white-space: pre-wrap; font-weight: 400; }
       .modal .adj-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
       .modal .adj-list li { margin: 0; padding: 10px 14px; font-size: 13px; line-height: 1.55; color: #3d3d3d; background: #f6faf7; border-left: 3px solid #147a3a; border-radius: 8px; }
