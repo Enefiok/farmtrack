@@ -304,6 +304,8 @@
       type: ACTIVITY_LABELS[a.activity_type] || a.activity_type,
       date: a.event_date, details: a.notes || (a.quantity != null ? String(n(a.quantity)) : ""),
       quantity: a.quantity != null ? n(a.quantity) : null,
+      // The raw notes, kept apart from "details" (which falls back to the quantity) so Adjust shows the real value.
+      notes: a.notes || "",
       created_at: a.created_at, created_by: a.created_by_name || ""
     };
   };
@@ -318,6 +320,14 @@
   const unitOf = function (v) {
     if (v && typeof v === "object") return v.name || v.abbreviation || "";
     return v == null ? "" : String(v);
+  };
+  // The unit of a sale or purchase line. Servers differ: it may be a plain string, an object, or sent
+  // beside a numeric id as unit_name / unit_display / unit_abbreviation. A bare number (an id) is never shown.
+  const lineUnit = function (l) {
+    const found = [l.unit_name, l.unit_display, l.unit_abbreviation, l.unit_label, l.unit]
+      .map(unitOf)
+      .find(function (t) { return t && !/^\d+$/.test(t); });
+    return found || "";
   };
   // Payment fields shared by sales, purchases and expenses. If the server did not send an
   // outstanding balance, work it out from the total and the amount paid.
@@ -346,7 +356,9 @@
     const lines = (Array.isArray(x.lines) ? x.lines : []).map(function (l) {
       return {
         item: idOf(l.item), item_name: l.item_name || nameOf(l.item),
-        quantity: n(l.quantity), unit: unitOf(l.unit), unit_price: n(l.unit_price), total: n(l.total)
+        // The flock the birds came from (only set when birds were sold from a specific flock).
+        flock: idOf(l.flock),
+        quantity: n(l.quantity), unit: lineUnit(l), unit_price: n(l.unit_price), total: n(l.total)
       };
     });
     const sum = function (k) { return lines.reduce(function (t, l) { return t + l[k]; }, 0); };
@@ -378,7 +390,7 @@
     const lines = (Array.isArray(x.lines) ? x.lines : []).map(function (l) {
       return {
         item: idOf(l.item), item_name: l.item_name || nameOf(l.item),
-        quantity: n(l.quantity), unit: unitOf(l.unit), unit_price: n(l.unit_price), total: n(l.total)
+        quantity: n(l.quantity), unit: lineUnit(l), unit_price: n(l.unit_price), total: n(l.total)
       };
     });
     const sum = function (k) { return lines.reduce(function (t, l) { return t + l[k]; }, 0); };
@@ -391,9 +403,11 @@
       lines: lines,
       item: lines.map(function (l) { return l.item_name; }).filter(Boolean).join(", ") || (typeof x.item === "string" ? x.item : ""),
       quantity: lines.length ? sum("quantity") : n(x.quantity),
-      unit: (lines.length && lines[0].unit) || unitOf(x.unit),
+      unit: (lines.length && lines[0].unit) || lineUnit(x),
       unit_cost: lines.length ? lines[0].unit_price : n(x.unit_cost),
       total_cost: totalCost,
+      // Receipt status ("Received" / "Ordered"). Empty when the server does not send one yet.
+      status: String(x.receipt_status || x.status || ""),
       amount_paid: pay.amount_paid,
       outstanding_balance: pay.outstanding_balance,
       payments: paymentsOf(x),
@@ -569,16 +583,23 @@
         discount_type: v.discount_type === "PERCENT" ? "PERCENT" : "FIXED",
         discount_value: money(orZero(v.discount_value)),
         amount_paid: money(orZero(v.amount_paid)),
+        // How the amount paid now was paid (CASH, BANK_TRANSFER, CARD, MOBILE_MONEY).
+        payment_method: v.payment_method || "CASH",
+        // Receipt number or bank reference for the amount paid now. Left out when empty.
+        reference: String(v.reference || "").trim() || undefined,
         notes: v.notes ? String(v.notes).trim() : "",
         lines: [
           {
             item: Number(v.product),
             quantity: money(v.quantity),
-            // The unit the goods were sold in (Crate, Tray, Egg, Bag, Kg). It belongs to the line.
+            // The unit the goods were sold in (Crate, Tray, Egg, Bag, Kg, Bird). It belongs to the line.
             unit: v.unit || "",
             unit_price: money(v.price),
             // The line is the full price before the discount. The discount is sent separately above.
-            total: money(orZero(v.quantity) * orZero(v.price))
+            total: money(orZero(v.quantity) * orZero(v.price)),
+            // Only set when birds are sold from a specific flock ("Sell Birds"). The backend then
+            // lowers that flock's current count and marks it "Sold out" when it reaches 0.
+            flock: v.flock ? toId(v.flock) : undefined
           }
         ]
       };
@@ -593,7 +614,12 @@
       return {
         event_date: v.date,
         party: await supplierIdFor(farmId, v.supplier),
+        // Whether the goods have arrived yet. The server stores RECEIVED or ORDERED.
+        receipt_status: v.receipt_status === "ORDERED" ? "ORDERED" : "RECEIVED",
         amount_paid: money(orZero(v.amount_paid)),
+        payment_method: v.payment_method || "CASH",
+        // Receipt number or bank reference for the amount paid now. Left out when empty.
+        reference: String(v.reference || "").trim() || undefined,
         notes: v.stock_received ? String(v.stock_received).trim() : "",
         lines: [
           {
@@ -615,8 +641,11 @@
         notes: notes,
         category: v.category || "General",
         payment_details: v.payment_details,
+        // The form offers readable names; the backend wants CASH, BANK_TRANSFER, CARD or MOBILE_MONEY.
+        payment_method: ({ "cash": "CASH", "bank transfer": "BANK_TRANSFER", "card/pos": "CARD", "mobile money": "MOBILE_MONEY" })[String(v.payment_details || "").trim().toLowerCase()] || "CASH",
         // The backend works out the outstanding balance from amount and amount_paid.
         amount_paid: money(orZero(v.amount_paid)),
+        reference: String(v.reference || "").trim() || undefined,
         classification: "LIVE"
       };
       // The supplier is optional. If one was typed, link it (it is created as a supplier if it is new).

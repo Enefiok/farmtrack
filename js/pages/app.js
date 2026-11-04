@@ -179,7 +179,7 @@
     async create(type, values) {
       if (!DEV) {
         await AgroAPI.createRecord(type, state.farmId, values);
-        await api.load(); // reloads everything, so a mortality also updates the flock's current_count
+        await api.load(); // reloads everything, so a mortality or a bird sale also updates the flock's current_count
         return;
       }
       await delay(250);
@@ -192,6 +192,13 @@
         if (fl) {
           fl.current_count = Math.max(0, num(fl.current_count) - num(values.birds));
           fl.mortality_rate = fl.starting_count ? +(((fl.starting_count - fl.current_count) / fl.starting_count) * 100).toFixed(1) : 0;
+        }
+      }
+      if (type === "sales" && values.flock) { // DEV only: selling birds from a flock lowers its count
+        const fl = findFlock(values.flock);
+        if (fl) {
+          fl.current_count = Math.max(0, num(fl.current_count) - num(values.quantity));
+          if (fl.current_count === 0) fl.status = "Sold out";
         }
       }
       writeStore();
@@ -360,7 +367,7 @@
   const owedTone = (v) => (num(v) > 0 ? "red" : "green");
   // Later payments: the record type in this app -> the transaction_type the backend expects.
   const PAYMENT_KIND = { sales: "SALE", purchase: "PURCHASE", expense: "EXPENSE" };
-  const PAYMENT_METHODS = [["CASH", "Cash"], ["BANK_TRANSFER", "Bank Transfer"], ["CARD", "Card/POS"]];
+  const PAYMENT_METHODS = [["CASH", "Cash"], ["BANK_TRANSFER", "Bank Transfer"], ["CARD", "Card/POS"], ["MOBILE_MONEY", "Mobile Money"]];
   const methodLabel = (m) => (PAYMENT_METHODS.find((x) => x[0] === String(m).toUpperCase()) || [0, m || "—"])[1];
 
   // Every farm type the app will offer. Only entries with ready: true can be created today.
@@ -458,6 +465,8 @@
         { name: "discount_value", label: "Discount Value", type: "number", placeholder: "0", min: 0, step: "0.01" },
         { name: "total", label: "Total Sale Value", type: "computed", fmt: fmtMoney },
         { name: "amount_paid", label: "Amount Paid Now", type: "number", placeholder: "0.00", min: 0, step: "0.01" },
+        { name: "payment_method", label: "Payment Method", type: "select", placeholder: "Select method", default: "CASH", options: PAYMENT_METHODS },
+        { name: "reference", label: "Reference (Optional)", type: "text", placeholder: "e.g. Receipt #123 or Bank Ref" },
         { name: "outstanding_balance", label: "Amount Owed", type: "computed", fmt: fmtMoney },
         { name: "notes", label: "Notes", type: "textarea", placeholder: "Write Something" },
       ],
@@ -481,6 +490,8 @@
         { name: "date", label: "Purchase Date", type: "date", required: true },
         // Type a new name or pick an existing supplier. A new name is saved as a supplier automatically.
         { name: "supplier", label: "Supplier", type: "text", placeholder: "Enter or choose a supplier", required: true, suggest: () => (state.lookups.suppliers || []).map((s) => s.name) },
+        // Sent to the backend as receipt_status. New purchases default to Received.
+        { name: "receipt_status", label: "Receipt Status", type: "select", placeholder: "Select status", required: true, default: "RECEIVED", options: [["RECEIVED", "Received"], ["ORDERED", "Ordered"]] },
         { name: "item", label: "Item", type: "select", placeholder: "Enter item", emptyText: "No items yet. Add an item on the server first.", required: true, options: () => state.lookups.items.map((i) => [i.id, i.name]) },
         { name: "quantity", label: "Quantity", type: "number", placeholder: "Enter quantity", required: true, min: 0.01 },
         // What the goods are bought in (for example Bags of feed or Bottles of medicine). Sent inside the purchase line.
@@ -488,6 +499,8 @@
         { name: "unit_cost", label: "Unit Cost", type: "number", placeholder: "Enter unit cost", required: true, min: 0, step: "0.01" },
         { name: "total_cost", label: "Total Cost", type: "computed", fmt: fmtMoney },
         { name: "amount_paid", label: "Amount Paid Now", type: "number", placeholder: "0.00", min: 0, step: "0.01" },
+        { name: "payment_method", label: "Payment Method", type: "select", placeholder: "Select method", default: "CASH", options: PAYMENT_METHODS },
+        { name: "reference", label: "Reference (Optional)", type: "text", placeholder: "e.g. Receipt #123 or Bank Ref" },
         { name: "outstanding_balance", label: "Amount Owed", type: "computed", fmt: fmtMoney },
         // Sent to the backend as the purchase notes
         { name: "stock_received", label: "Notes / stock received", type: "text", placeholder: "Enter details" },
@@ -509,6 +522,7 @@
         { name: "amount", label: "Amount", type: "number", placeholder: "Enter amount", required: true, min: 0.01, step: "0.01" },
         { name: "payment_details", label: "Payment details", type: "select", placeholder: "Enter details", required: true, options: list("Cash", "Bank transfer", "Card/POS", "Mobile money", "On credit") },
         { name: "amount_paid", label: "Amount Paid Now", type: "number", placeholder: "0.00", min: 0, step: "0.01" },
+        { name: "reference", label: "Reference (Optional)", type: "text", placeholder: "e.g. Receipt #123 or Bank Ref" },
         { name: "outstanding_balance", label: "Amount Owed", type: "computed", fmt: fmtMoney },
         { name: "description", label: "Description", type: "textarea", short: true, placeholder: "Enter description", required: true },
         { name: "supporting_note", label: "Supporting Note", type: "textarea", short: true, placeholder: "Write something" },
@@ -519,7 +533,7 @@
     activity: {
       title: "Farm Activities", sub: "Track daily farm operations, treatments, and losses.", saved: "Activity saved.",
       errorMap: { event_date: "date" },
-      button: "Next", centered: true,
+      centered: true,
       tabs: [
         { key: "feed", label: "Feed consumption", code: "FEED_CONSUMPTION",
           fields: [
@@ -586,6 +600,48 @@
     },
   };
 
+  // ----- "Sell Birds" (a sale linked to one specific flock) -----
+  // It reuses the Sales form and the sales endpoint. The flock id travels inside the sale line,
+  // and the backend lowers that flock's current count (and marks it "Sold out" at 0).
+  const BIRD_UNITS = [["Bird", "Bird"], ["Crate", "Crate"], ["Kg", "Kg"]];
+  let sellFlock = null; // the flock being sold from while the Sell Birds window is open
+
+  // Items that can be sold from a flock. Eggs are never offered here (they are sold from stock, not from a flock).
+  // If the farm has items named like birds (Spent hens, Live birds, Roosters ...), only those are shown.
+  // If none are named like that, every item except eggs is shown so the user is never stuck with an empty list.
+  const isEggItem = (i) => String(i.category || "").toUpperCase() === "EGG" || /egg/i.test(i.name || "");
+  const isBirdItem = (i) => /hen|bird|rooster|cock|chicken|broiler|layer|pullet|cull/i.test(i.name || "");
+  const birdItems = () => {
+    const all = state.lookups.items.filter((i) => !isEggItem(i));
+    const birds = all.filter(isBirdItem);
+    return birds.length ? birds : all;
+  };
+
+  SCHEMAS.sellbirds = {
+    ...SCHEMAS.sales,
+    title: "Sell Birds",
+    sub: "Record a sale of birds from this flock",
+    saved: "Bird sale recorded.",
+    // No discount fields here. The payload still sends a zero fixed discount.
+    fields: SCHEMAS.sales.fields
+      .filter((f) => !["discount_type", "discount_value"].includes(f.name))
+      .map((f) => {
+        if (f.name === "unit") return { ...f, options: BIRD_UNITS };
+        if (f.name === "product") {
+          return { ...f, label: "Type of Bird", placeholder: "Select type of bird", emptyText: "No bird items yet. Add an item such as Spent hens on the server first.", options: () => birdItems().map((i) => [i.id, i.name]) };
+        }
+        return f;
+      }),
+    check: (v) => {
+      const errs = {};
+      if (sellFlock && num(v.quantity) > num(sellFlock.current_count)) {
+        errs.quantity = `Cannot be more than the flock's current count (${fmtInt(sellFlock.current_count)}).`;
+      }
+      if (num(v.amount_paid) > saleTotal(v)) errs.amount_paid = "Amount paid cannot be more than the total sale value.";
+      return errs;
+    },
+  };
+
   /* =====================================================================
      TABLE COLUMNS (records list)
      Each column is [header, getter, isNumber?, shortenOnScreen?].
@@ -598,9 +654,9 @@
     production: [["Date", (r) => fmtDate(r.date)], ["Flock", (r) => flockName(r.flock)], ["Collected", (r) => fmtInt(r.collected), 1], ["Damaged", (r) => fmtInt(r.damaged || 0), 1], ["Saleable", (r) => fmtInt(r.saleable) + (r.packaging ? " " + r.packaging : ""), 1], ["Recorded by", (r) => r.recorded_by]],
     sales: [["Date", (r) => fmtDate(r.date)], ["Customer", (r) => r.customer], ["Product", (r) => r.product], ["Quantity", (r) => unitQty(r), 1], ["Total", (r) => fmtMoney(r.total), 1], ["Outstanding", (r) => fmtMoney(r.outstanding_balance || 0), 1]],
     purchase: [["Date", (r) => fmtDate(r.date)], ["Supplier", (r) => r.supplier], ["Item", (r) => r.item], ["Quantity", (r) => unitQty(r), 1], ["Total cost", (r) => fmtMoney(r.total_cost), 1], ["Outstanding", (r) => fmtMoney(r.outstanding_balance || 0), 1]],
-    expense: [["Date", (r) => fmtDate(r.date)], ["Supplier", (r) => r.supplier || "—"], ["Description", (r) => r.description], ["Amount", (r) => fmtMoney(r.amount), 1], ["Outstanding", (r) => fmtMoney(r.outstanding_balance || 0), 1]],
+    expense: [["Date", (r) => fmtDate(r.date)], ["Supplier", (r) => r.supplier || "—"], ["Description", (r) => r.description, 0, 1], ["Amount", (r) => fmtMoney(r.amount), 1], ["Outstanding", (r) => fmtMoney(r.outstanding_balance || 0), 1]],
     adjustment: [["Date", (r) => (r.date ? fmtWhen(r.date) : "—")], ["Record", (r) => adjRecordLabel(r), 0, 1], ["Reason", (r) => adjReasonLabel(r.reason)], ["Changed field", (r) => adjFieldsText(r), 0, 1], ["Old → New", (r) => adjChangeText(r), 0, 1], ["User", (r) => r.created_by || "—"], ["Notes", (r) => r.notes || "—", 0, 1]],
-    activity: [["Date", (r) => fmtDate(r.date)], ["Type", (r) => r.type], ["Flock", (r) => (r.flock ? flockName(r.flock) : "—")], ["Details", (r) => r.details || "—"]],
+    activity: [["Date", (r) => fmtDate(r.date)], ["Type", (r) => r.type], ["Flock", (r) => (r.flock ? flockName(r.flock) : "—")], ["Details", (r) => r.details || "—", 0, 1]],
   };
   // Extra per-row buttons. Kept out of COLS on purpose: COLS values are escaped as text and also
   // feed the CSV export and the search box, so button HTML there would show up as literal text.
@@ -611,7 +667,7 @@
   const ROW_ACTIONS = {
     flock: rowBtns(viewBtn("view-flock"), "flock"),
     production: rowBtns(viewBtn("view-production"), "production"),
-    activity: viewBtn("view-activity"),
+    activity: rowBtns(viewBtn("view-activity"), "activity"),
     sales: rowBtns(viewBtn("view-sale"), "sales"),
     purchase: rowBtns(viewBtn("view-purchase"), "purchase"),
     expense: rowBtns(viewBtn("view-expense"), "expense"),
@@ -1164,7 +1220,8 @@
   // Read-only data is shown as plain text (label above value), not as greyed-out input boxes.
   // rows: [[label, value, long?]]. "long" items take the full width and wrap (notes, long old/new values).
   // lines (optional): [{ name, quantity, unit, unit_price, total }]
-  // adjust (optional): { type, id } adds the "Adjustment history" block and the Adjust button.
+  // adjust (optional): { type, id, extra? } adds the "Adjustment history" block and the Adjust button.
+  //   "extra" is optional button HTML shown before the Adjust button (for example "Sell Birds" on a flock).
   // summary (optional): { badge: [text, tone], stats: [[label, value], ...] } is a headline strip at the top.
   // pay (optional): { type, id, payments, outstanding } adds the "Payment history" block and the "Record Payment" button.
   function openDetailModal(title, sub, rows, lines, trigger, adjust, summary, pay) {
@@ -1208,7 +1265,7 @@
           ${items ? `<h3 class="dv-h">Details</h3><dl class="dv-grid">${items}</dl>` : ""}
           ${linesHTML}${pay ? paymentHistoryHTML(pay.payments) : ""}${adjust ? adjHistoryHTML(adjust.type, adjust.id) : ""}
           ${footer}
-          <div class="actions" style="margin-top:24px">${pay && pay.outstanding > 0 ? payBtn(pay.type, pay.id) : ""}${adjust ? adjustBtn(adjust.type, adjust.id) : ""}<button class="btn" type="button" data-close>Close</button></div>
+          <div class="actions" style="margin-top:24px">${pay && pay.outstanding > 0 ? payBtn(pay.type, pay.id) : ""}${adjust && adjust.extra ? adjust.extra : ""}${adjust ? adjustBtn(adjust.type, adjust.id) : ""}<button class="btn" type="button" data-close>Close</button></div>
         </div>
       </div>`;
     document.body.style.overflow = "hidden";
@@ -1222,6 +1279,10 @@
   function openViewFlockModal(flockId, trigger) {
     const f = state.data.flock.find((x) => String(x.id) === String(flockId));
     if (!f) return;
+    // The "Sell Birds" button only appears while the flock still has birds to sell.
+    const sellBtn = num(f.current_count) > 0
+      ? `<button class="btn" type="button" data-action="sell-flock" data-id="${esc(f.id)}">${icon("wallet", 15)}Sell Birds</button>`
+      : "";
     openDetailModal("Flock details", `${f.identifier}: complete record for this flock`, [
       ["Flock Identifier", f.identifier],
       ["Breed/Type", f.breed || "—"],
@@ -1229,13 +1290,30 @@
       ["Arrival Date", fmtDate(f.arrival_date)],
       ["Age at Arrival", f.age_at_arrival != null && f.age_at_arrival !== "" ? f.age_at_arrival : "—"],
       ...createdRows(f),
-    ], null, trigger, { type: "flock", id: f.id }, {
+    ], null, trigger, { type: "flock", id: f.id, extra: sellBtn }, {
       badge: f.status ? [f.status, String(f.status).toLowerCase() === "active" ? "ok" : ""] : null,
       stats: [
         ["Current birds", fmtInt(f.current_count), "bird", "green"],
         ["Starting birds", fmtInt(f.starting_count), "inventory", "neutral"],
         ["Mortality", num(f.mortality_rate).toFixed(1) + "%", "alert", num(f.mortality_rate) > 0 ? "red" : "green"],
       ],
+    });
+  }
+
+  // Opens the Sales form pre-filled for selling birds from one flock.
+  // On save, the sale is posted to the sales endpoint with the flock id inside the sale line.
+  function openSellFlockModal(flockId, trigger) {
+    const f = findFlock(flockId);
+    if (!f) return;
+    if (num(f.current_count) <= 0) { toast("This flock has no birds left to sell."); return; }
+    sellFlock = f;
+    // Default the item to "Spent hen" or "Bird" when the farm has one; otherwise the first bird item.
+    const choices = birdItems();
+    const item = choices.find((i) => /spent hen|bird/i.test(i.name)) || choices[0];
+    openModal("sellbirds", trigger, {
+      title: `Sell Birds from ${f.identifier}`,
+      extra: { flock: f.id },
+      defaults: { quantity: f.current_count, unit: "Bird", product: item ? item.id : "" },
     });
   }
 
@@ -1268,7 +1346,7 @@
       ...(r.quantity != null && r.quantity !== "" ? [["Quantity", fmtQty(r.quantity)]] : []),
       ...createdRows(r),
       ["Details", r.details || "—", true],
-    ], null, trigger);
+    ], null, trigger, { type: "activity", id: r.id });
   }
 
   function openViewPurchaseModal(id, trigger) {
@@ -1283,6 +1361,8 @@
       ...createdRows(r),
       ["Notes", r.notes || "—", true],
     ], lines, trigger, { type: "purchase", id: r.id }, {
+      // Receipt status badge. Only shown when the server sends a status.
+      badge: r.status ? [String(r.status).replace(/_/g, " ").toLowerCase().replace(/^./, (c) => c.toUpperCase()), /received/i.test(r.status) ? "ok" : "warn"] : null,
       stats: [
         ["Total cost", fmtMoney(r.total_cost), "wallet", "amber"],
         ["Amount paid", fmtMoney(r.amount_paid || 0), "check", "green"],
@@ -1336,7 +1416,7 @@
     const rows = (payments || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
     return `<h3 class="dv-h">Payment history</h3>${rows.length
       ? `<div class="table-wrap mini-lines"><table><thead><tr><th>Date</th><th class="num">Amount</th><th>Method</th><th>Reference</th></tr></thead><tbody>${
-        rows.map((p) => `<tr><td>${esc(fmtDate(p.date))}</td><td class="num">${esc(fmtMoney(p.amount))}</td><td>${esc(methodLabel(p.method))}</td><td>${esc(p.reference || "—")}</td></tr>`).join("")}</tbody></table></div>`
+        rows.map((p) => `<tr><td>${esc(fmtDate(p.date))}</td><td class="num">${esc(fmtMoney(p.amount))}</td><td>${esc(methodLabel(p.method))}</td><td>${esc(p.reference || "")}</td></tr>`).join("")}</tbody></table></div>`
       : `<p class="empty-line" style="padding:8px 0 0">No payments recorded yet.</p>`}`;
   }
   const adjustBtn = (type, id) => `<button class="btn ghost" type="button" data-action="adjust-record" data-rtype="${type}" data-id="${esc(id)}">${icon("edit", 15)}Adjust</button>`;
@@ -1366,6 +1446,10 @@
       { key: "quantity_collected", ui: "collected", label: "Eggs collected", kind: "int" },
       { key: "quantity_damaged", ui: "damaged", label: "Damaged/broken eggs", kind: "int" },
       { key: "quantity_saleable", ui: "saleable", label: "Saleable quantity", kind: "int" },
+    ] },
+    activity: { model: "FarmActivity", fields: [
+      { key: "quantity", ui: "quantity", label: "Quantity", kind: "decimal" },
+      { key: "notes", ui: "notes", label: "Notes", kind: "text" },
     ] },
     expense: { model: "Expense", fields: [
       { key: "amount", ui: "amount", label: "Amount", kind: "money" },
@@ -1662,7 +1746,10 @@
     search.focus();
   }
 
-  // preset (optional): { farm_type, farm_type_label } chosen in step 1 of "Create farm"
+  // preset (optional):
+  //   { farm_type, farm_type_label } chosen in step 1 of "Create farm"
+  //   { title, extra, defaults } used by "Sell Birds": a custom title, values merged into what is saved
+  //   (extra), and values filled into the form when it opens (defaults)
   function openModal(type, trigger, preset) {
     const base = SCHEMAS[type];
     let tabKey = base.tabs ? base.tabs[0].key : null;
@@ -1674,7 +1761,7 @@
       <div class="backdrop" id="backdrop">
         <div class="modal${base.centered ? " center" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title">
           <button class="close" type="button" data-close aria-label="Close">${icon("x", 18)}</button>
-          <h2 id="modal-title">${esc(base.title)}</h2><p class="sub">${esc(base.sub)}</p>
+          <h2 id="modal-title">${esc((preset && preset.title) || base.title)}</h2><p class="sub">${esc(base.sub)}</p>
           ${preset && preset.farm_type_label ? `<p class="type-chip">Farm type: <b>${esc(preset.farm_type_label)}</b><button type="button" class="link-btn" data-change-type>Change</button></p>` : ""}
           ${tabsHTML}
           <form id="record-form" novalidate>
@@ -1707,6 +1794,15 @@
     mountFields();
     if (base.rowFields) mountRows(base.rowFields); // "Add existing birds": one or more flock rows
 
+    // "Sell Birds": fill in the starting values (quantity, unit, item) and recalculate the totals
+    if (preset && preset.defaults) {
+      Object.entries(preset.defaults).forEach(([n, val]) => {
+        const el = field(form, n);
+        if (el && val != null && val !== "") el.value = val;
+      });
+      refreshComputed(form, cur());
+    }
+
     form.addEventListener("input", () => refreshComputed(form, cur()));
     form.addEventListener("change", () => refreshComputed(form, cur()));
     form.addEventListener("submit", (e) => {
@@ -1721,9 +1817,8 @@
         if (el) el.focus();
         return;
       }
-      const clean = { ...res.clean, ...(preset ? { farm_type: preset.farm_type } : {}), ...(rr ? { rows: rr.rows } : {}) };
-      if (base.tabs) showReview(clean, s); // "Next" -> review step
-      else save(type, clean, s, $("#save-btn"), $("#form-error"));
+      const clean = { ...res.clean, ...(preset && preset.farm_type ? { farm_type: preset.farm_type } : {}), ...(preset && preset.extra ? preset.extra : {}), ...(rr ? { rows: rr.rows } : {}) };
+      save(type, clean, s, $("#save-btn"), $("#form-error"));
     });
 
     if (tabsEl) {
@@ -1756,6 +1851,7 @@
   function closeModal() {
     $("#modal-root").innerHTML = "";
     document.body.style.overflow = "";
+    sellFlock = null; // the Sell Birds window is closed, so forget which flock it was for
     if (modalTrigger && document.contains(modalTrigger)) modalTrigger.focus();
     modalTrigger = null;
   }
@@ -1852,7 +1948,9 @@
         closeModal(); toast(s.saved); renderView();
       } else {
         const payload = s.summary ? { ...clean, type: s.label, code: s.code, details: s.summary(clean) } : clean;
-        await api.create(type, payload);
+        // "Sell Birds" is a normal sale (with the flock id on the line), so it goes to the sales endpoint.
+        // api.create reloads every list afterwards, so the flock's new count and any "Sold out" status show at once.
+        await api.create(type === "sellbirds" ? "sales" : type, payload);
         closeModal(); toast(s.saved); renderView();
       }
     } catch (err) {
@@ -1941,6 +2039,7 @@
       case "add-record": openModal(act.dataset.type, act); break;
       case "add-existing": openModal("opening", act); break;
       case "view-flock": openViewFlockModal(act.dataset.id, act); break;
+      case "sell-flock": openSellFlockModal(act.dataset.id, act); break;
       case "adjust-record": openAdjustModal(act.dataset.rtype, act.dataset.id, act); break;
       case "record-payment": openPaymentModal(act.dataset.id, act.dataset.rtype, act); break;
       case "view-production": openViewProductionModal(act.dataset.id, act); break;
@@ -2083,6 +2182,7 @@
       .modal .dv-head h2 { margin: 0; }
       .dv-badge { padding: 3px 11px; font-size: 12px; font-weight: 600; border-radius: 999px; background: #efefef; color: #555; }
       .dv-badge.ok { background: #e3f2e8; color: #147a3a; }
+      .dv-badge.warn { background: #fff4d6; color: #8a6100; }
       .dv-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 18px 0 0; }
       .dv-stat { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px; background: #fff; border: 1px solid var(--line, #e3e3e3); border-radius: 14px; }
       .dv-stat { border-left: 4px solid #d6d9d6; }
