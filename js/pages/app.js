@@ -74,6 +74,8 @@
     reports: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 17v-5M12 17V8M16 17v-3"/>',
     users: '<circle cx="9" cy="7" r="4"/><path d="M2 21v-1a6 6 0 0 1 6-6h2"/><circle cx="18" cy="18" r="3"/>',
     upload: '<path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/>',
+    download: '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/>',
+    filter: '<path d="M22 3H2l8 9.46V19l4 2v-8.54z"/>',
     bird: '<path d="M16 7h.01"/><path d="M3.4 18H12a8 8 0 0 0 8-8V7a4 4 0 0 0-7.28-2.3L2 20"/><path d="m20 7 2 .5-2 .5"/><path d="M10 18v3M14 17.75V21"/><path d="M7 18a6 6 0 0 0 3.84-10.61"/>',
     egg: '<path d="M12 2C8 2 4 8 4 14a8 8 0 0 0 16 0c0-6-4-12-8-12"/>',
     wallet: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
@@ -967,7 +969,7 @@
     const addExisting = type === "flock" ? `<button class="btn ghost" data-action="add-existing">${icon("bird", 16)}Add existing flocks</button>` : "";
     const toolbar = `<div class="toolbar">
       <div class="tabs" role="tablist" aria-label="Record types">${visibleTabs().map(([k, l]) => `<button class="tab" role="tab" aria-selected="${k === type}" data-tab="${k}">${l}</button>`).join("")}</div>
-      <div class="toolbar-actions">${addExisting}<button class="btn" data-action="export-records" data-type="${type}">${icon("upload", 16)}Export</button></div>
+      <div class="toolbar-actions">${addExisting}${type === "adjustment" ? "" : `<button class="btn" data-action="add-record" data-type="${type}">${icon("plus", 14)}Add Record</button>`}</div>
     </div>`;
 
     if (!rows.length) {
@@ -986,7 +988,7 @@
     };
     const body = shown.map((r) => `<tr>${cols.map((c) => cellHTML(r, c)).join("")}${rowAction ? `<td class="num">${rowAction(r)}</td>` : ""}</tr>`).join("");
     return toolbar + `<section class="card table-card">
-      <div class="table-head"><h3>${type === "adjustment" ? "Adjustment log" : esc(label) + " records"}</h3>${type === "adjustment" ? "" : `<button class="btn" data-action="add-record" data-type="${type}">${icon("plus", 14)}Add Record</button>`}</div>
+      <div class="table-head"><h3>${type === "adjustment" ? "Adjustment log" : esc(label) + " records"}</h3><div class="toolbar-actions"><button class="btn ghost" data-action="filter-records" data-type="${type}">${icon("filter", 14)}Filter</button><button class="icon-btn square" data-action="export-records" data-type="${type}" aria-label="Download all records" title="Download all records">${icon("download", 18)}</button></div></div>
       ${shown.length ? `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">No records match "${esc(state.query)}".</div>`}
     </section>`;
   }
