@@ -467,7 +467,9 @@
       // The stock on hand as sent by the server (null when the server does not send it).
       current_stock: i.current_stock != null ? n(i.current_stock) : null,
       // false once the item has been archived (soft-deleted) on the server
-      is_active: i.is_active !== false
+      is_active: i.is_active !== false,
+      // When the item last changed. Falls back to the created time; empty when the server sends neither.
+      updated_at: i.updated_at || i.modified_at || i.created_at || ""
     };
   };
   const normConversion = function (c) {

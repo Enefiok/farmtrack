@@ -68,6 +68,39 @@
     </div>`;
   }
 
+    const invUnitName = (i) => i.base_unit_name || (state.inventory.units.find((u) => String(u.id) === String(i.base_unit)) || {}).name || "—";
+  // "Nov 4, 2026 • 10:24am"
+  const fmtStamp = (iso) => {
+    const d = iso ? new Date(iso) : null;
+    if (!d || isNaN(d)) return "—";
+    const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(/\s/g, "").toLowerCase();
+    return `${date} • ${time}`;
+  };
+  const STOCK_FILTERS = [["", "All stock"], ["in", "In stock"], ["out", "Out of stock"], ["untracked", "Not tracked"]];
+
+  // Items after the search box, the category select and the stock filter are all applied.
+  function inventoryShown() {
+    const q = state.query.trim().toLowerCase();
+    const cat = state.invCategory || "", stk = state.invStock || "";
+    const stockOk = (i) => stk === "in" ? i.is_stock_tracked && i.current_stock > 0
+      : stk === "out" ? i.is_stock_tracked && i.current_stock != null && i.current_stock <= 0
+      : stk === "untracked" ? !i.is_stock_tracked : true;
+    return state.inventory.items.filter((i) =>
+      (!q || `${i.name} ${categoryLabel(i.category)} ${i.base_unit_name}`.toLowerCase().includes(q)) &&
+      (!cat || String(i.category).toUpperCase() === cat) && stockOk(i));
+  }
+
+  function exportInventory() {
+    const rows = inventoryShown();
+    if (!rows.length) { toast("There are no items to export."); return; }
+    downloadCSV("inventory", [
+      ["Name", "Category", "Base unit", "Stock tracked", "Current stock", "Last updated"],
+      ...rows.map((i) => [i.name, categoryLabel(i.category), invUnitName(i), i.is_stock_tracked ? "Yes" : "No",
+        i.is_stock_tracked && i.current_stock != null ? fmtQty(i.current_stock) : "", fmtStamp(i.updated_at)]),
+    ]);
+  }
+
   function inventoryView() {
     const inv = state.inventory;
     const head = `<div class="page-head"><div><h1>Inventory</h1><p>Items you buy, produce and sell, and the units they come in.</p></div><button class="btn" data-action="add-item">${icon("plus", 14)}Add Item</button></div>`;
@@ -76,20 +109,49 @@
     if (!inv.items.length) {
       return head + `<div class="state-card">${icon("inventory", 28)}<h2>No items yet</h2><p>Add items such as Fresh Eggs, Layer Feed or Spent Hens, then set their unit conversions.</p><button class="btn" data-action="add-item">${icon("plus", 14)}Add Item</button></div>`;
     }
-    const q = state.query.trim().toLowerCase();
-    const shown = q ? inv.items.filter((i) => `${i.name} ${categoryLabel(i.category)} ${i.base_unit_name}`.toLowerCase().includes(q)) : inv.items;
-    const unitName = (i) => i.base_unit_name || (inv.units.find((u) => String(u.id) === String(i.base_unit)) || {}).name || "—";
-    const btn = (action, id, label) => `<button class="btn ghost" type="button" style="padding:4px 10px;font-size:12px" data-action="${action}" data-id="${esc(id)}">${label}</button>`;
+    // const q = state.query.trim().toLowerCase();
+    // const shown = q ? inv.items.filter((i) => `${i.name} ${categoryLabel(i.category)} ${i.base_unit_name}`.toLowerCase().includes(q)) : inv.items;
+    // const unitName = (i) => i.base_unit_name || (inv.units.find((u) => String(u.id) === String(i.base_unit)) || {}).name || "—";
+    // const btn = (action, id, label) => `<button class="btn ghost" type="button" style="padding:4px 10px;font-size:12px" data-action="${action}" data-id="${esc(id)}">${label}</button>`;
+    // const rows = shown.map((i) => {
+    //   // Only items that track stock have a stock figure. The server may not send one yet, so show a dash then.
+    //   const stockVal = i.is_stock_tracked && i.current_stock != null ? fmtQty(i.current_stock) : "—";
+    //   return `<tr>
+    //   <td class="item-name">${esc(i.name)}</td><td><span class="chip cat-${esc(String(i.category).toLowerCase())}">${esc(categoryLabel(i.category))}</span></td><td>${esc(unitName(i))}</td><td><span class="pill ${i.is_stock_tracked ? "on" : "off"}">${i.is_stock_tracked ? "Yes" : "No"}</span></td>      <td class="num">${esc(stockVal)}</td>
+    //   <td class="num"><span style="display:inline-flex;gap:6px;align-items:center">${btn("edit-item", i.id, "Edit")}${btn("archive-item", i.id, "Archive")}${btn("manage-conversions", i.id, "Conversions")}${btn("stock-history", i.id, "History")}</span></td></tr>`;
+    // }).join("");
+    //   return head + inventoryStats(inv.items) + `<section class="card table-card">
+    //   <div class="table-head"><h3>Items</h3></div>
+    //   ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Base unit</th><th>Stock tracked</th><th class="num">Current Stock</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">No items match "${esc(state.query)}".</div>`}
+    // </section>`;
+
+
+    
+     const shown = inventoryShown();
+    const menuItem = (action, id, ic, label, cls) => `<button type="button" role="menuitem"${cls ? ` class="${cls}"` : ""} data-action="${action}" data-id="${esc(id)}">${icon(ic, 15)}${label}</button>`;
     const rows = shown.map((i) => {
       // Only items that track stock have a stock figure. The server may not send one yet, so show a dash then.
       const stockVal = i.is_stock_tracked && i.current_stock != null ? fmtQty(i.current_stock) : "—";
+      const mid = `inv-menu-${i.id}`;
       return `<tr>
-      <td class="item-name">${esc(i.name)}</td><td><span class="chip cat-${esc(String(i.category).toLowerCase())}">${esc(categoryLabel(i.category))}</span></td><td>${esc(unitName(i))}</td><td><span class="pill ${i.is_stock_tracked ? "on" : "off"}">${i.is_stock_tracked ? "Yes" : "No"}</span></td>      <td class="num">${esc(stockVal)}</td>
-      <td class="num"><span style="display:inline-flex;gap:6px;align-items:center">${btn("edit-item", i.id, "Edit")}${btn("archive-item", i.id, "Archive")}${btn("manage-conversions", i.id, "Conversions")}${btn("stock-history", i.id, "History")}</span></td></tr>`;
+      <td class="item-name">${esc(i.name)}</td><td><span class="chip cat-${esc(String(i.category).toLowerCase())}">${esc(categoryLabel(i.category))}</span></td><td>${esc(invUnitName(i))}</td><td><span class="pill ${i.is_stock_tracked ? "on" : "off"}">${i.is_stock_tracked ? "Yes" : "No"}</span></td>
+      <td class="num">${esc(stockVal)}</td>
+      <td>${esc(fmtStamp(i.updated_at))}</td>
+      <td class="num"><div class="menu-wrap" style="display:inline-block"><button class="icon-btn square row-btn" type="button" data-menu="${mid}" data-fixed aria-haspopup="true" aria-label="Actions for ${esc(i.name)}">${icon("more", 16)}</button>
+        <div class="menu tbl-menu" id="${mid}" role="menu" hidden>${menuItem("edit-item", i.id, "edit", "Edit")}${menuItem("manage-conversions", i.id, "convert", "Conversions")}${menuItem("stock-history", i.id, "history", "History")}${menuItem("archive-item", i.id, "archive", "Archive", "danger")}</div></div></td></tr>`;
     }).join("");
-      return head + inventoryStats(inv.items) + `<section class="card table-card">
-      <div class="table-head"><h3>Items</h3></div>
-      ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Base unit</th><th>Stock tracked</th><th class="num">Current Stock</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">No items match "${esc(state.query)}".</div>`}
+
+    const cat = state.invCategory || "", stk = state.invStock || "";
+    const tools = `<div class="head-tools">
+      <div class="sel"><select id="inv-category" aria-label="Filter by category"><option value=""${cat ? "" : " selected"}>All categories</option>${ITEM_CATEGORIES.map(([v, l]) => `<option value="${v}"${cat === v ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>${icon("chevronDown", 16)}</div>
+      <div class="menu-wrap"><button class="tool-btn${stk ? " on" : ""}" type="button" data-menu="inv-filter-menu" data-fixed aria-haspopup="true">${icon("filter", 15)}Filter</button>
+        <div class="menu tbl-menu" id="inv-filter-menu" role="menu" hidden>${STOCK_FILTERS.map(([v, l]) => `<button type="button" role="menuitem"${stk === v ? ' class="on"' : ""} data-action="inv-stock-filter" data-value="${v}">${l}</button>`).join("")}</div></div>
+      <button class="tool-btn" type="button" data-action="export-inventory" aria-label="Download as CSV">${icon("download", 16)}</button>
+    </div>`;
+    const empty = state.query.trim() ? `No items match "${esc(state.query)}".` : "No items match these filters.";
+    return head + inventoryStats(inv.items) + `<section class="card table-card">
+      <div class="table-head"><div><h3>Inventory items</h3><p class="sub-line">Showing the latest records for ${esc((farm() || {}).name || "your farm")}</p></div>${tools}</div>
+      ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Base unit</th><th>Stock tracked</th><th class="num">Current Stock</th><th>Last updated</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">${empty}</div>`}
     </section>`;
   }
 

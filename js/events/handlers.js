@@ -7,6 +7,17 @@
   function closeMenus(except) {
     $$(".menu").forEach((m) => { if (m !== except) m.hidden = true; });
   }
+    // Menus inside the table sit in a box that clips overflow, so they are placed on screen next to their button.
+  function placeMenu(menu, btn) {
+    const r = btn.getBoundingClientRect();
+    menu.style.position = "fixed";
+    menu.style.left = "auto";
+    menu.style.right = Math.max(8, window.innerWidth - r.right) + "px";
+    menu.style.top = (r.bottom + 6) + "px";
+    const h = menu.offsetHeight;
+    if (r.bottom + 6 + h > window.innerHeight - 8) menu.style.top = Math.max(8, r.top - 6 - h) + "px";
+  }
+  window.addEventListener("scroll", () => closeMenus(), true);
   const closeNav = () => document.body.classList.remove("nav-open");
 
   document.addEventListener("click", (e) => {
@@ -18,6 +29,7 @@
       const willOpen = menu.hidden;
       closeMenus();
       menu.hidden = !willOpen;
+      if (willOpen && menuBtn.hasAttribute("data-fixed")) placeMenu(menu, menuBtn);
       return;
     }
     if (!t.closest(".menu")) closeMenus();
@@ -32,6 +44,7 @@
 
     const act = t.closest("[data-action]");
     if (!act) return;
+        if (act.closest(".tbl-menu")) closeMenus();
     switch (act.dataset.action) {
       case "add-record": openModal(act.dataset.type, act); break;
       case "add-existing": openModal("opening", act); break;
@@ -49,6 +62,8 @@
       case "archive-item": archiveItemAction(findItem(act.dataset.id)); break;
       case "manage-conversions": openConversionsModal(act.dataset.id, act); break;
       case "stock-history": openStockHistoryModal(act.dataset.id, act); break;
+      case "export-inventory": exportInventory(); break;
+      case "inv-stock-filter": state.invStock = act.dataset.value; renderView(); break;
       case "retry-inventory": state.inventory.status = "idle"; renderView(); break;
       case "toggle-note": {
         const dd = act.previousElementSibling; // the note text sits just before the button
@@ -101,6 +116,7 @@
       $("#chart").innerHTML = chartHTML();
       bindChart();
     }
+        if (e.target.id === "inv-category") { state.invCategory = e.target.value; renderView(); }
   });
 
   document.addEventListener("input", (e) => {
