@@ -508,6 +508,8 @@
   const customerIdFor = function (farmId, name) { return partyIdFor(farmId, name, "CUSTOMER", "customer"); };
   const supplierIdFor = function (farmId, name) { return partyIdFor(farmId, name, "SUPPLIER", "supplier"); };
 
+  // No longer used by the Production form (the user now picks the item), but kept in case
+  // something else still needs a default egg item.
   async function eggItemId(farmId) {
     if (CONFIG.DEFAULTS.eggItemId) return CONFIG.DEFAULTS.eggItemId;
     const cached = LS.get(K_EGG_ITEM + farmId, null);
@@ -570,9 +572,15 @@
       return body;
     }
     if (type === "production") {
+      // The item comes from the "Item" dropdown on the Production form.
+      // If nothing was chosen, show an error under the field instead of a vague server rejection.
+      const itemId = toId(v.item);
+      if (itemId === "" || itemId == null || (typeof itemId === "number" && !Number.isFinite(itemId))) {
+        throw new ApiError(0, { item: ["Choose an item from the list."] });
+      }
       const body = {
         flock: toId(v.flock),
-        item: await eggItemId(farmId),
+        item: itemId,
         quantity_collected: Number(v.collected),
         quantity_damaged: v.damaged === "" || v.damaged == null ? 0 : Number(v.damaged),
         quantity_saleable: Number(v.saleable),

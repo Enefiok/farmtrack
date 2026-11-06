@@ -101,6 +101,15 @@
       fields: [
         { name: "date", label: "Egg Collection Date", type: "date", required: true },
         { name: "flock", label: "Flock", type: "select", placeholder: "Enter flock", emptyText: "Add a flock first", required: true, options: flockOptions },
+        // The inventory item the eggs are added to. Only egg items are offered. If no item is categorised
+        // as EGG, every item is shown so the user is never stuck with an empty list.
+        // isEggItem is declared further down in this file; options runs lazily, so that is safe.
+        { name: "item", label: "Item", type: "select", placeholder: "Select item", emptyText: "No egg items yet. Add one in Inventory first.", required: true,
+          options: () => {
+            const items = state.lookups.items || [];
+            const eggs = items.filter(isEggItem);
+            return (eggs.length ? eggs : items).map((i) => [i.id, i.name]);
+          } },
         { name: "collected", label: "Eggs Collected", type: "number", placeholder: "Enter amount of eggs", required: true, min: 0, integer: true },
         { name: "damaged", label: "Damaged/Broken Eggs", type: "number", placeholder: "Enter broken eggs", min: 0, integer: true },
         { name: "saleable", label: "Saleable Quantity", type: "computed", fmt: (v) => fmtInt(v) },
@@ -309,4 +318,3 @@
       return errs;
     },
   };
-
