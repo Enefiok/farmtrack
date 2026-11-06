@@ -1,0 +1,112 @@
+/* js/views/dashboard.js - dashboardView and its cards */
+"use strict";
+
+  function statCard(ic, label, value, delta, since) {
+    const badge = delta == null ? "" : `<span class="badge ${delta < 0 ? "neg" : ""}">${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%</span><span>${since}</span>`;
+    return `<div class="card stat"><div class="lbl">${icon(ic, 16)}${esc(label)}</div><div class="val">${value}</div><div class="delta">${badge}</div></div>`;
+  }
+
+  function activityItems() {
+    const d = state.data;
+    const mk = (type, r) => {
+      switch (type) {
+        case "production": return { ic: "egg", t: "Egg production recorded", s: `${fmtInt(r.collected)} eggs • ${flockName(r.flock)}` };
+        case "sales": return { ic: "wallet", t: "Sale recorded", s: `${unitQty(r)} ${r.product} • ${r.customer}` };
+        case "purchase": return { ic: "wallet", t: "Purchase recorded", s: `${unitQty(r)} ${r.item} • ${r.supplier}` };
+        case "flock": return { ic: "bird", t: "Flock added", s: `${fmtInt(r.starting_count)} birds • ${r.identifier}` };
+        case "expense": return { ic: "wallet", t: "Expense recorded", s: `${r.supplier || r.description} • ${fmtMoney0(r.amount)}` };
+        default: return { ic: "records", t: `${r.type} recorded`, s: r.details || (r.flock ? flockName(r.flock) : "Farm activity") };
+      }
+    };
+    return TYPES.flatMap((t) => d[t].map((r) => ({ ...mk(t, r), at: r.created_at })))
+      .sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 5);
+  }
+
+  /* ---------- "Add existing birds" setup card ---------- */
+  const skipKey = () => `agroflow:v1:skip-opening:${state.farmId}`;
+  const openingSkipped = () => { try { return localStorage.getItem(skipKey()) === "1"; } catch { return false; } };
+  // Shown only while the farm has no flocks and the user hasn't skipped it.
+  // As soon as any flock exists it disappears by itself.
+  const showSetupCard = () => state.data.flock.length === 0 && !openingSkipped();
+
+  function setupCard() {
+    return `<section class="card setup-card">
+      <div class="setup-ic">${icon("bird", 22)}</div>
+      <div class="setup-txt"><h3>Already have birds on your farm?</h3><p>Add them now so your numbers start correct.</p></div>
+      <div class="setup-actions">
+        <button class="btn" data-action="add-existing">${icon("plus", 14)}Add existing birds</button>
+        <button class="link-btn" data-action="skip-opening">Skip, I'm starting fresh</button>
+      </div>
+    </section>`;
+  }
+
+  function flockOverviewCard() {
+    const fl = state.data.flock.filter((f) => f.status === "Active").slice(0, 5);
+    return `<section class="card perf area-perf">
+          <h3>Flock overview</h3>
+          <p class="sub">Birds on your farm</p>
+          ${fl.length ? fl.map((f) => `<div class="act">${icon("bird", 18)}<div class="txt"><b>${esc(f.identifier)}</b><small>${esc(f.stage)} • ${fmtInt(f.current_count)} of ${fmtInt(f.starting_count)} birds</small></div><time>${num(f.mortality_rate).toFixed(1)}% lost</time></div>`).join("") : `<div class="empty-line">No active flocks yet.</div>`}
+          <div class="below"><span>${fmtInt(metrics().live)} live birds</span><button class="chip" data-action="review-flock">View flocks</button></div>
+        </section>`;
+  }
+
+  function dashboardView() {
+    const m = metrics();
+    const h = new Date().getHours();
+    const greet = h < 12 ? "Good Morning" : h < 17 ? "Good Afternoon" : "Good Evening";
+    const rate = m.target > 0 ? (m.eggsToday / m.target) * 100 : 0;
+    const C = 2 * Math.PI * 52;
+    const below = Math.max(0, m.target - m.eggsToday);
+    const acts = activityItems();
+
+    return `
+      <div class="page-head">
+        <div><h1>${greet}!</h1><p>Here's what's happening at ${esc(farm().name)} today.</p></div>
+        <button class="btn" data-action="export-dashboard">${icon("upload", 16)}Export</button>
+      </div>
+
+      ${showSetupCard() ? setupCard() : ""}
+
+      <div class="stats">
+        ${statCard("bird", "Live birds", fmtInt(m.live), null)}
+        ${hasEggs() ? statCard("egg", "Eggs collected today", fmtInt(m.eggsToday), m.eggsDelta, "From yesterday") : statCard("bird", "Active flocks", fmtInt(state.data.flock.filter((f) => f.status === "Active").length), null)}
+        ${statCard("wallet", "Stock Value", fmtMoney0(m.buyAll), m.buyDelta, "From last month")}
+        ${statCard("trend", "Sales this month", fmtMoney0(m.sellM), m.sellDelta, "From last month")}
+      </div>
+
+      <div class="dash-grid">
+        <section class="card area-chart">
+          <div class="card-head">
+            <h3>Financial Overview</h3>
+            <div class="legend">
+              <span>Income <i style="background:#147a3a"></i></span>
+              <span>Expenses <i style="background:#f3b93a"></i></span>
+              <select class="range" id="range" aria-label="Chart view">
+                <option value="monthly" ${state.range === "monthly" ? "selected" : ""}>Monthly View</option>
+                <option value="quarterly" ${state.range === "quarterly" ? "selected" : ""}>Quarterly View</option>
+              </select>
+            </div>
+          </div>
+          <div class="chart" id="chart">${chartHTML()}</div>
+        </section>
+
+        ${hasEggs() ? `<section class="card perf area-perf">
+          <h3>Production performance</h3>
+          <p class="sub">Today's laying target</p>
+          <div class="donut">
+            <svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="52" fill="none" stroke="var(--line)" stroke-width="9"/>${rate > 0 ? `<circle cx="60" cy="60" r="52" fill="none" stroke="#4f9a67" stroke-width="9" stroke-linecap="round" stroke-dasharray="${(C * Math.min(rate, 100)) / 100} ${C}"/>` : ""}</svg>
+            <div class="mid"><b>${rate.toFixed(1)}%</b><span>Laying rate</span></div>
+          </div>
+          <div class="split"><div><small>Collected</small><b>${fmtInt(m.eggsToday)}</b></div><div class="vr"></div><div><small>Target</small><b>${fmtInt(m.target)}</b></div></div>
+          <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(rate, 100).toFixed(0)}"><i style="width:${Math.min(rate, 100)}%"></i></div>
+          <div class="below"><span>${fmtInt(below)} eggs below target</span>${below > 0 && m.target > 0 ? `<button class="chip" data-action="review-flock">Review flock</button>` : ""}</div>
+        </section>` : flockOverviewCard()}
+
+        <section class="card recent area-recent">
+          <div class="card-head"><h3>Recent Activity</h3><button class="link-btn" data-action="view-all">View all ${icon("chevronRight", 14)}</button></div>
+          <p class="sub">Latest records from your team</p>
+          ${acts.length ? acts.map((a) => `<div class="act">${icon(a.ic, 18)}<div class="txt"><b>${esc(a.t)}</b><small>${esc(a.s)}</small></div><time>${esc(fmtWhen(a.at))}</time></div>`).join("") : `<div class="empty-line">No activity yet. Records you add will show up here.</div>`}
+        </section>
+      </div>`;
+  }
+
