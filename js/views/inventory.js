@@ -47,6 +47,27 @@
     } catch { /* keep the old lists */ }
   }
 
+    // Small summary card used at the top of the Inventory page (reuses the dashboard .stat look).
+  function invStatCard(ic, label, value, caption, warn) {
+    return `<div class="card stat${warn ? " warn" : ""}"><div class="lbl">${icon(ic, 16)}${esc(label)}</div><div class="val">${esc(String(value))}</div><div class="delta"><span>${esc(caption)}</span></div></div>`;
+  }
+
+  function inventoryStats(items) {
+    const total = items.length;
+    const tracked = items.filter((i) => i.is_stock_tracked);
+    // current_stock can be null when the server doesn't send it yet; then we can't count in/out of stock.
+    const known = tracked.filter((i) => i.current_stock != null);
+    const inStock = known.filter((i) => i.current_stock > 0).length;
+    const out = known.filter((i) => i.current_stock <= 0).length;
+    const dash = known.length ? null : "—";
+    return `<div class="stats">
+      ${invStatCard("inventory", "Total items", fmtInt(total), "In your inventory")}
+      ${invStatCard("check", "Stock tracked", fmtInt(tracked.length), `of ${fmtInt(total)} items`)}
+      ${invStatCard("egg", "In stock", dash || fmtInt(inStock), "Tracked items with stock")}
+      ${invStatCard("alert", "Out of stock", dash || fmtInt(out), out ? "Needs restocking" : "Nothing to restock", out > 0)}
+    </div>`;
+  }
+
   function inventoryView() {
     const inv = state.inventory;
     const head = `<div class="page-head"><div><h1>Inventory</h1><p>Items you buy, produce and sell, and the units they come in.</p></div><button class="btn" data-action="add-item">${icon("plus", 14)}Add Item</button></div>`;
@@ -63,11 +84,10 @@
       // Only items that track stock have a stock figure. The server may not send one yet, so show a dash then.
       const stockVal = i.is_stock_tracked && i.current_stock != null ? fmtQty(i.current_stock) : "—";
       return `<tr>
-      <td>${esc(i.name)}</td><td>${esc(categoryLabel(i.category))}</td><td>${esc(unitName(i))}</td><td>${i.is_stock_tracked ? "Yes" : "No"}</td>
-      <td class="num">${esc(stockVal)}</td>
+      <td class="item-name">${esc(i.name)}</td><td><span class="chip cat-${esc(String(i.category).toLowerCase())}">${esc(categoryLabel(i.category))}</span></td><td>${esc(unitName(i))}</td><td><span class="pill ${i.is_stock_tracked ? "on" : "off"}">${i.is_stock_tracked ? "Yes" : "No"}</span></td>      <td class="num">${esc(stockVal)}</td>
       <td class="num"><span style="display:inline-flex;gap:6px;align-items:center">${btn("edit-item", i.id, "Edit")}${btn("archive-item", i.id, "Archive")}${btn("manage-conversions", i.id, "Conversions")}${btn("stock-history", i.id, "History")}</span></td></tr>`;
     }).join("");
-    return head + `<section class="card table-card">
+      return head + inventoryStats(inv.items) + `<section class="card table-card">
       <div class="table-head"><h3>Items</h3></div>
       ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Base unit</th><th>Stock tracked</th><th class="num">Current Stock</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">No items match "${esc(state.query)}".</div>`}
     </section>`;

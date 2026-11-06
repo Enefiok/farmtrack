@@ -160,6 +160,8 @@
     .stat .delta { display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--muted); }
     .badge { padding: 2px 6px; border-radius: 6px; background: var(--green-soft); color: var(--green); font-size: 10px; }
     .badge.neg { background: #fde3e3; color: #b3261e; }
+    .stat.warn .lbl .i { color: var(--error); }
+    .stat.warn .val { color: var(--error); }
 
     .dash-grid {
       display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start;
@@ -335,3 +337,32 @@
 .rows-total { margin: 0; font-size: 13px; opacity: .75; }
 /* with several rows the modal gets tall, so let it scroll */
 .modal { max-height: 90vh; overflow-y: auto; }
+
+    /* ---------- Inventory table polish ---------- */
+    .table-card { border-radius: 14px; }
+    .table-card th { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding-top: 14px; padding-bottom: 14px; }
+    .table-card tbody tr { transition: background .12s; }
+    .table-card tbody tr:hover { background: var(--green-tint); }
+    .item-name { font-weight: 500; }
+
+    .chip { --c: #6b6b6b; display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 500; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+    .chip.cat-feed { --c: #157b3a; }
+    .chip.cat-medicine { --c: #2563eb; }
+    .chip.cat-egg { --c: #b7791f; }
+    .chip.cat-livestock { --c: #7c3aed; }
+    .chip.cat-supply { --c: #0e7490; }
+    .chip.cat-equipment { --c: #6b6b6b; }
+
+    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 500; }
+    .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .pill.on { color: var(--green); background: var(--green-soft); }
+    .pill.off { color: var(--muted); background: var(--field); }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) .chip.cat-feed { --c: #5ccf88; }
+      :root:not([data-theme="light"]) .chip.cat-medicine { --c: #7aa5ff; }
+      :root:not([data-theme="light"]) .chip.cat-egg { --c: #f0c060; }
+      :root:not([data-theme="light"]) .chip.cat-livestock { --c: #b794f6; }
+      :root:not([data-theme="light"]) .chip.cat-supply { --c: #4fd1e8; }
+      :root:not([data-theme="light"]) .chip.cat-equipment { --c: #a8a8a8; }
+    }
