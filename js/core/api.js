@@ -453,6 +453,29 @@
     };
   };
 
+  // ---------- Inventory: units, items and unit conversions ----------
+  const normUnit = function (u) {
+    return { id: u.id, name: u.name || u.abbreviation || "", abbreviation: u.abbreviation || "" };
+  };
+  const normInventoryItem = function (i) {
+    return {
+      id: i.id, name: i.name || "",
+      category: String(i.category || "").toUpperCase(),
+      base_unit: idOf(i.base_unit),
+      base_unit_name: i.base_unit_name || i.base_unit_display || nameOf(i.base_unit) || "",
+      is_stock_tracked: !!i.is_stock_tracked,
+      // false once the item has been archived (soft-deleted) on the server
+      is_active: i.is_active !== false
+    };
+  };
+  const normConversion = function (c) {
+    return {
+      id: c.id, unit: idOf(c.unit),
+      unit_name: c.unit_name || c.unit_display || nameOf(c.unit) || "",
+      factor: n(c.factor), is_base_unit: !!c.is_base_unit
+    };
+  };
+
   // The server wants the id of a party (customer or supplier), but the form lets the user type a name.
   // Find the party with that name, or create it if it is new.
   async function partyIdFor(farmId, name, type, field) {
@@ -490,7 +513,7 @@
     try {
       // listAll, so the egg item is found even if it is not on the first page
       const egg = (await listAll(farmUrl("items", farmId))).find(function (i) {
-        return i.category === "EGG";
+        return i.category === "EGG" && i.is_active !== false;
       });
       if (egg) {
         LS.set(K_EGG_ITEM + farmId, egg.id);
@@ -801,10 +824,60 @@
         .filter(function (p) { return String(p.party_type || "").toUpperCase() === "SUPPLIER"; })
         .map(function (p) { return { id: p.id, name: p.name || p.full_name || p.display_name || "" }; });
     },
+    // Archived items are left out so they no longer appear in the Sales, Purchase and Sell Birds forms.
     listItems: async function (farmId) {
       return (await listAll(farmUrl("items", farmId)))
+        .filter(function (i) { return i.is_active !== false; })
         .map(function (i) { return { id: i.id, name: i.name || "", category: i.category || "" }; });
     },
+
+    // ---------- Inventory: items, units and unit conversions ----------
+    // All global units (kg, bag, egg, bird ...), used by the item and conversion dropdowns.
+    listUnits: async function () {
+      return (await listAll(CONFIG.FARM_ENDPOINTS.units)).map(normUnit);
+    },
+    // Full item rows for the Inventory screen (listItems above is the slim list used by the forms).
+    // Archived items are left out of the table.
+    listInventory: async function (farmId) {
+      return (await listAll(farmUrl("items", farmId)))
+        .map(normInventoryItem)
+        .filter(function (i) { return i.is_active; });
+    },
+    // v: { name, category, base_unit, is_stock_tracked }
+    createItem: function (farmId, v) {
+      return request("POST", farmUrl("items", farmId), {
+        name: String(v.name).trim(),
+        category: v.category,
+        base_unit: toId(v.base_unit),
+        is_stock_tracked: !!v.is_stock_tracked
+      });
+    },
+    // v: { name, category, base_unit, is_stock_tracked }. Only the fields you pass are sent.
+    // The backend rejects a base_unit change (400) once the item has been used in transactions.
+    updateItem: function (farmId, itemId, v) {
+      const body = {};
+      if (v.name != null) body.name = String(v.name).trim();
+      if (v.category != null) body.category = v.category;
+      if (v.base_unit != null) body.base_unit = toId(v.base_unit);
+      if (v.is_stock_tracked != null) body.is_stock_tracked = !!v.is_stock_tracked;
+      return request("PATCH", farmUrl("items", farmId) + encodeURIComponent(itemId) + "/", body);
+    },
+    // Soft delete: the backend sets is_active = false and keeps the history.
+    archiveItem: function (farmId, itemId) {
+      return request("DELETE", farmUrl("items", farmId) + encodeURIComponent(itemId) + "/");
+    },
+    listConversions: async function (farmId, itemId) {
+      return (await listAll(farmUrl("items", farmId) + encodeURIComponent(itemId) + "/conversions/")).map(normConversion);
+    },
+    // v: { unit, factor, is_base_unit }
+    createConversion: function (farmId, itemId, v) {
+      return request("POST", farmUrl("items", farmId) + encodeURIComponent(itemId) + "/conversions/", {
+        unit: toId(v.unit),
+        factor: Number(v.factor),
+        is_base_unit: !!v.is_base_unit
+      });
+    },
+
     // Dropdown data must never stop the whole app from loading, so a failed list becomes an empty one.
     loadLookups: async function (farmId) {
       const safe = async function (promise) {
