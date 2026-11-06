@@ -48,6 +48,7 @@
       case "edit-item": openEditItemModal(findItem(act.dataset.id), act); break;
       case "archive-item": archiveItemAction(findItem(act.dataset.id)); break;
       case "manage-conversions": openConversionsModal(act.dataset.id, act); break;
+      case "stock-history": openStockHistoryModal(act.dataset.id, act); break;
       case "retry-inventory": state.inventory.status = "idle"; renderView(); break;
       case "toggle-note": {
         const dd = act.previousElementSibling; // the note text sits just before the button
@@ -150,4 +151,3 @@
         .catch(() => { /* keep showing what we already have */ });
     }
   });
-

@@ -1,4 +1,4 @@
-/* js/views/inventory.js - inventory view, item and conversion modals */
+/* js/views/inventory.js - inventory view, item and conversion modals, stock history */
 "use strict";
 
   /* =====================================================================
@@ -59,12 +59,17 @@
     const shown = q ? inv.items.filter((i) => `${i.name} ${categoryLabel(i.category)} ${i.base_unit_name}`.toLowerCase().includes(q)) : inv.items;
     const unitName = (i) => i.base_unit_name || (inv.units.find((u) => String(u.id) === String(i.base_unit)) || {}).name || "—";
     const btn = (action, id, label) => `<button class="btn ghost" type="button" style="padding:4px 10px;font-size:12px" data-action="${action}" data-id="${esc(id)}">${label}</button>`;
-    const rows = shown.map((i) => `<tr>
+    const rows = shown.map((i) => {
+      // Only items that track stock have a stock figure. The server may not send one yet, so show a dash then.
+      const stockVal = i.is_stock_tracked && i.current_stock != null ? fmtQty(i.current_stock) : "—";
+      return `<tr>
       <td>${esc(i.name)}</td><td>${esc(categoryLabel(i.category))}</td><td>${esc(unitName(i))}</td><td>${i.is_stock_tracked ? "Yes" : "No"}</td>
-      <td class="num"><span style="display:inline-flex;gap:6px;align-items:center">${btn("edit-item", i.id, "Edit")}${btn("archive-item", i.id, "Archive")}${btn("manage-conversions", i.id, "Conversions")}</span></td></tr>`).join("");
+      <td class="num">${esc(stockVal)}</td>
+      <td class="num"><span style="display:inline-flex;gap:6px;align-items:center">${btn("edit-item", i.id, "Edit")}${btn("archive-item", i.id, "Archive")}${btn("manage-conversions", i.id, "Conversions")}${btn("stock-history", i.id, "History")}</span></td></tr>`;
+    }).join("");
     return head + `<section class="card table-card">
       <div class="table-head"><h3>Items</h3></div>
-      ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Base unit</th><th>Stock tracked</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">No items match "${esc(state.query)}".</div>`}
+      ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Base unit</th><th>Stock tracked</th><th class="num">Current Stock</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">No items match "${esc(state.query)}".</div>`}
     </section>`;
   }
 
@@ -305,3 +310,41 @@
     (firstEl || $(".close")).focus();
   }
 
+  /* ---------- Stock history (the stock ledger for one item) ---------- */
+  async function openStockHistoryModal(itemId, trigger) {
+    const item = findItem(itemId);
+    if (!item) return;
+    modalTrigger = trigger || document.activeElement;
+    const baseName = item.base_unit_name || (state.inventory.units.find((u) => String(u.id) === String(item.base_unit)) || {}).name || "";
+
+    $("#modal-root").innerHTML = `
+      <div class="backdrop" id="backdrop">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+          <button class="close" type="button" data-close aria-label="Close">${icon("x", 18)}</button>
+          <div class="dv-head"><h2 id="modal-title">Stock history</h2><span class="dv-badge">${esc(categoryLabel(item.category))}</span></div>
+          <p class="sub">${esc(item.name)}: every recorded stock movement${baseName ? ", counted in " + esc(baseName) : ""}.</p>
+          <div id="history-list"><div class="empty-line" style="padding:8px 0 0">Loading…</div></div>
+          <div class="actions" style="margin-top:24px"><button class="btn" type="button" data-close>Close</button></div>
+        </div>
+      </div>`;
+    document.body.style.overflow = "hidden";
+    const closeBtn = $(".actions [data-close]");
+    if (closeBtn) closeBtn.focus();
+
+    try {
+      const movements = DEV ? [] : await AgroAPI.listStockMovements(state.farmId, item.id);
+      const listEl = $("#history-list");
+      if (!listEl) return; // the window was closed while this was loading
+      if (!movements.length) {
+        listEl.innerHTML = `<p class="empty-line" style="padding:8px 0 0">No stock movements recorded yet. Record a purchase or production to see history here.</p>`;
+        return;
+      }
+      listEl.innerHTML = `<div class="table-wrap mini-lines"><table><thead><tr><th>Date</th><th>Source</th><th>Direction</th><th class="num">Quantity</th><th>Notes</th></tr></thead><tbody>${movements.map((m) => {
+        const inbound = String(m.direction || "").toUpperCase() === "IN";
+        return `<tr><td>${esc(fmtDate(String(m.event_date || "").slice(0, 10)))}</td><td>${esc(m.source_type || "—")}</td><td><b style="color:${inbound ? "#147a3a" : "#c0392b"}">${esc(m.direction || "—")}</b></td><td class="num">${esc(fmtQty(num(m.quantity)))}</td><td>${esc(m.notes || "—")}</td></tr>`;
+      }).join("")}</tbody></table></div>`;
+    } catch (err) {
+      const listEl = $("#history-list");
+      if (listEl) listEl.innerHTML = `<p class="empty-line" style="padding:8px 0 0" role="alert">We couldn't load the stock history for this item.</p>`;
+    }
+  }

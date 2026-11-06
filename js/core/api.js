@@ -464,6 +464,8 @@
       base_unit: idOf(i.base_unit),
       base_unit_name: i.base_unit_name || i.base_unit_display || nameOf(i.base_unit) || "",
       is_stock_tracked: !!i.is_stock_tracked,
+      // The stock on hand as sent by the server (null when the server does not send it).
+      current_stock: i.current_stock != null ? n(i.current_stock) : null,
       // false once the item has been archived (soft-deleted) on the server
       is_active: i.is_active !== false
     };
@@ -868,6 +870,10 @@
     },
     listConversions: async function (farmId, itemId) {
       return (await listAll(farmUrl("items", farmId) + encodeURIComponent(itemId) + "/conversions/")).map(normConversion);
+    },
+    // Stock movements for one item (the stock ledger shown in the History window).
+    listStockMovements: async function (farmId, itemId) {
+      return listAll(farmUrl("items", farmId) + encodeURIComponent(itemId) + "/movements/");
     },
     // v: { unit, factor, is_base_unit }
     createConversion: function (farmId, itemId, v) {
