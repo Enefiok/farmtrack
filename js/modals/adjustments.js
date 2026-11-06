@@ -188,6 +188,8 @@
         const el = $("#f-" + bad[0]); if (el) el.focus();
         return;
       }
+
+      // The log entry is the same for every record type.
       const payload = {
         target_model: spec.model, target_id: rec.id, reason: v.reason, notes: v.notes,
         changes: [{ field: sp.key, old_value: sp.kind === "text" || sp.kind === "select" ? (oldOf(sp) ?? "") : num(oldOf(sp)), new_value: v.new_value }],
@@ -195,8 +197,17 @@
       const btn = $("#save-btn"), errEl = $("#form-error");
       saving = true; btn.disabled = true; btn.textContent = "Saving…";
       try {
+        // For a sale, change the sale itself first. The backend reverses the old stock and applies the new one.
+        // updateSaleField checks everything before sending, so a refusal here means nothing was changed
+        // and no adjustment log is written.
+        if (type === "sales") {
+          await AgroAPI.updateSaleField(state.farmId, rec, sp.key, v.new_value);
+        }
+        // Then write the adjustment log, exactly as before, for every record type.
         await api.adjust(rec, sp, payload);
-        closeModal(); toast("Adjustment saved."); renderView();
+        closeModal();
+        toast(type === "sales" ? "Sale updated and adjustment saved." : "Adjustment saved.");
+        renderView();
       } catch (err) {
         let msg = "We couldn't save this adjustment. Please try again.";
         if (err && err.name === "ApiError") {
@@ -216,4 +227,3 @@
     const firstEl = $("select", form);
     (firstEl || $(".close")).focus();
   }
-

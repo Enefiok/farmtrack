@@ -603,7 +603,9 @@
     if (type === "sales") {
       return {
         event_date: v.date,
-        party: await customerIdFor(farmId, v.customer),
+        // v.party_id is used when editing an existing sale (the customer is already known by id).
+        // Otherwise the typed customer name is looked up or created.
+        party: v.party_id != null && v.party_id !== "" ? toId(v.party_id) : await customerIdFor(farmId, v.customer),
         // The discount and the amount paid are sent at the top level of the payload, not inside the line.
         discount_type: v.discount_type === "PERCENT" ? "PERCENT" : "FIXED",
         discount_value: money(orZero(v.discount_value)),
@@ -913,6 +915,67 @@
       const d = await request("POST", farmUrl(key, farmId), body);
       const rec = (d && (d.flock || d.activity || d.production || d)) || {};
       return { id: rec.id };
+    },
+
+    // Update an existing sale. The backend reverses the old stock and applies the new one.
+    // v: the same form values createRecord("sales", ...) takes.
+    updateSale: async function (farmId, saleId, v) {
+      if (isMock) { await wait(300); return { id: saleId }; }
+      const body = await recordBody("sales", farmId, v);
+      return request("PUT", farmUrl("sales", farmId) + encodeURIComponent(saleId) + "/", body);
+    },
+
+    // Correct ONE field of an existing sale (used by the Adjust window).
+    // rec      : the sale row as the UI holds it (state.data.sales item, shaped by normSale)
+    // fieldKey : "quantity" | "unit_price" | "total_amount"
+    // newValue : the corrected number
+    // It rebuilds the full sale from rec, changes only that field, keeps the sale's own notes,
+    // and calls updateSale so the backend reverses the old stock and applies the new one.
+    updateSaleField: async function (farmId, rec, fieldKey, newValue) {
+      const lines = Array.isArray(rec.lines) ? rec.lines : [];
+      if (lines.length > 1) {
+        throw new ApiError(0, null, "This sale has several lines, so it can't be adjusted here.");
+      }
+      const hasParty = rec.party != null && rec.party !== "";
+      if (!hasParty && !rec.customer) {
+        throw new ApiError(0, null, "This sale has no customer on record, so it can't be adjusted here.");
+      }
+      const line = lines[0] || {};
+      const value = Number(newValue);
+      let quantity = rec.quantity;
+      let price = line.unit_price != null ? line.unit_price : rec.price;
+
+      if (fieldKey === "quantity") {
+        quantity = value;
+      } else if (fieldKey === "unit_price") {
+        price = value;
+      } else if (fieldKey === "total_amount") {
+        if (rec.discount_value > 0) {
+          throw new ApiError(0, null, "This sale has a discount. Adjust the quantity or unit price instead.");
+        }
+        if (!quantity) {
+          throw new ApiError(0, null, "The quantity is zero, so the total can't be adjusted.");
+        }
+        price = value / quantity;
+      } else {
+        throw new ApiError(0, null, "That field can't be adjusted on a sale.");
+      }
+
+      return AgroAPI.updateSale(farmId, rec.id, {
+        date: rec.date,
+        party_id: hasParty ? rec.party : undefined,
+        customer: rec.customer,
+        product: line.item,
+        quantity: quantity,
+        price: price,
+        unit: line.unit || rec.unit || "",
+        flock: line.flock,
+        discount_type: rec.discount_type || "FIXED",
+        discount_value: rec.discount_value || 0,
+        amount_paid: rec.amount_paid || 0,
+        payment_method: "CASH",
+        notes: rec.notes || ""
+      });
     },
 
     // Loads every page of every record type for a farm.
