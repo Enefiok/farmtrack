@@ -13,30 +13,43 @@
 
   function optsOf(f) { return typeof f.options === "function" ? f.options() : f.options || []; }
 
-  function fieldHTML(f) {
+  // The input itself (no label and no error line), so it can also be reused inside a grouped row.
+  function controlHTML(f) {
     const id = "f-" + f.name;
-    let ctl;
     if (f.type === "select") {
       const opts = optsOf(f);
       const ph = opts.length ? f.placeholder : f.emptyText || "No options";
-      ctl = `<div class="control select"><select id="${id}" name="${f.name}" ${opts.length ? "" : "disabled"}><option value="" selected disabled hidden>${esc(ph)}</option>${opts.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(v)}">${esc(l)}</option>`; }).join("")}</select>${icon("chevronDown", 18)}</div>`;
-    } else if (f.type === "date") {
-      ctl = `<div class="control date"><input id="${id}" name="${f.name}" type="date">${icon("calendar", 18)}</div>`;
-    } else if (f.type === "textarea") {
-      ctl = `<div class="control${f.short ? " short" : ""}"><textarea id="${id}" name="${f.name}" placeholder="${esc(f.placeholder || "")}"></textarea></div>`;
-    } else if (f.type === "computed") {
-      ctl = `<div class="control"><input id="${id}" name="${f.name}" class="ro" readonly tabindex="-1" aria-readonly="true"></div>`;
-    } else if (f.type === "readonly") {
-      ctl = `<div class="control"><input id="${id}" name="${f.name}" class="ro" readonly tabindex="-1" value="${esc(f.value ? f.value() : "")}"></div>`;
-    } else {
-      const sugg = typeof f.suggest === "function" ? f.suggest() : f.suggest;
-      const list = sugg ? `list="dl-${f.name}"` : "";
-      const dl = sugg ? `<datalist id="dl-${f.name}">${sugg.map((o) => `<option value="${esc(o)}"></option>`).join("")}</datalist>` : "";
-      ctl = `<div class="control"><input id="${id}" name="${f.name}" type="${f.type}" ${list} ${f.type === "number" ? `inputmode="decimal" min="${f.min ?? ""}" step="${f.step || (f.integer ? 1 : "any")}"` : ""} placeholder="${esc(f.placeholder || "")}" autocomplete="off">${dl}</div>`;
+      return `<div class="control select"><select id="${id}" name="${f.name}" ${opts.length ? "" : "disabled"}><option value="" selected disabled hidden>${esc(ph)}</option>${opts.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(v)}">${esc(l)}</option>`; }).join("")}</select>${icon("chevronDown", 18)}</div>`;
     }
+    if (f.type === "date") return `<div class="control date"><input id="${id}" name="${f.name}" type="date">${icon("calendar", 18)}</div>`;
+    if (f.type === "textarea") return `<div class="control${f.short ? " short" : ""}"><textarea id="${id}" name="${f.name}" placeholder="${esc(f.placeholder || "")}"></textarea></div>`;
+    if (f.type === "computed") return `<div class="control"><input id="${id}" name="${f.name}" class="ro" readonly tabindex="-1" aria-readonly="true"></div>`;
+    if (f.type === "readonly") return `<div class="control"><input id="${id}" name="${f.name}" class="ro" readonly tabindex="-1" value="${esc(f.value ? f.value() : "")}"></div>`;
+    const sugg = typeof f.suggest === "function" ? f.suggest() : f.suggest;
+    const list = sugg ? `list="dl-${f.name}"` : "";
+    const dl = sugg ? `<datalist id="dl-${f.name}">${sugg.map((o) => `<option value="${esc(o)}"></option>`).join("")}</datalist>` : "";
+    return `<div class="control"><input id="${id}" name="${f.name}" type="${f.type}" ${list} ${f.type === "number" ? `inputmode="decimal" min="${f.min ?? ""}" step="${f.step || (f.integer ? 1 : "any")}"` : ""} placeholder="${esc(f.placeholder || "")}" autocomplete="off">${dl}</div>`;
+  }
+
+  function fieldHTML(f) {
     const r = f.reveal;
     const reveal = r ? `<div class="reveal" id="r-${r.name}" hidden><div class="field"><label for="f-${r.name}">${esc(r.label)}</label><div class="control"><input id="f-${r.name}" name="${r.name}" type="number" inputmode="numeric" min="${r.min}" step="1" placeholder="${esc(r.placeholder)}"></div><p class="error" id="e-${r.name}" role="alert"></p></div></div>` : "";
-    return `<div class="field" data-name="${f.name}"><label for="${id}">${esc(f.label)}</label>${ctl}<p class="error" id="e-${f.name}" role="alert"></p>${reveal}</div>`;
+    return `<div class="field" data-name="${f.name}"><label for="f-${f.name}">${esc(f.label)}</label>${controlHTML(f)}<p class="error" id="e-${f.name}" role="alert"></p>${reveal}</div>`;
+  }
+
+  // Quantity and Unit in one row: [ 10 ] [ Crate v ]. They stay two separate controls named
+  // "quantity" and "unit", so readValues, validation and the payload are unchanged.
+  function qtyUnitHTML(q, u) {
+    return `<div class="field qty-unit" data-name="${q.name}"><label for="f-${q.name}">${esc(q.label)}</label><div class="qty-row input-group">${controlHTML(q)}${controlHTML(u)}</div><p class="error" id="e-${q.name}" role="alert"></p><p class="error" id="e-${u.name}" role="alert"></p></div>`;
+  }
+
+  // All fields of a schema as HTML. A field with joinUnit swallows the unit field it points to.
+  function fieldsHTML(s) {
+    const joined = new Set(s.fields.filter((f) => f.joinUnit).map((f) => f.joinUnit));
+    return s.fields.filter((f) => !joined.has(f.name)).map((f) => {
+      const u = f.joinUnit && s.fields.find((x) => x.name === f.joinUnit);
+      return u ? qtyUnitHTML(f, u) : fieldHTML(f);
+    }).join("");
   }
 
   const allFields = (s) => s.fields.flatMap((f) => (f.reveal ? [f, f.reveal] : [f]));
@@ -174,6 +187,79 @@
     search.focus();
   }
 
+  /* ---------- Unit dropdown that follows the chosen item ---------- */
+  // On the Sales, Purchase, Sell Birds and Feed forms, the Unit dropdown offers only the chosen item's
+  // base unit plus the units that have a conversion for it. A schema opts in with:
+  //   unitFor: { item: <name of the item control>, unit: <name of the unit select>, byName?: true }
+  // byName is for a text box (the feed item), where the typed name is matched against the item names.
+  const unitCache = new Map();           // "farmId:itemId" -> list of unit names
+  function clearUnitCache() { unitCache.clear(); }
+  const unitSeqs = new Map();            // unit select name -> latest request number (ignores stale answers)
+
+  // Finds the item the user picked: by id for a dropdown, by name for a text box.
+  function lookupItem(ref, byName) {
+    const items = (state.lookups && state.lookups.items) || [];
+    if (byName) {
+      const q = String(ref || "").trim().toLowerCase();
+      return q ? items.find((i) => String(i.name).trim().toLowerCase() === q) || null : null;
+    }
+    return items.find((i) => String(i.id) === String(ref)) || null;
+  }
+
+  // The unit names allowed for an item: its base unit first, then every unit with a conversion.
+  async function unitsForItem(item) {
+    const key = state.farmId + ":" + item.id;
+    if (unitCache.has(key)) return unitCache.get(key);
+    const names = [];
+    const add = (n) => { n = String(n || "").trim(); if (n && !names.some((x) => x.toLowerCase() === n.toLowerCase())) names.push(n); };
+    const inv = findItem(item.id) || {};
+    const baseId = item.base_unit != null ? item.base_unit : inv.base_unit;
+    const unitRow = ((state.inventory && state.inventory.units) || []).find((u) => String(u.id) === String(baseId)) || {};
+    add(item.base_unit_name || inv.base_unit_name || unitRow.name);
+    const convs = DEV ? ((state.inventory.devConv || {})[`dev-conv-${item.id}`] || []) : await AgroAPI.listConversions(state.farmId, item.id);
+    convs.forEach((c) => add(c.unit_name));
+    unitCache.set(key, names);
+    return names;
+  }
+
+  // Rebuilds the Unit options. keep = the unit that was selected before (kept when still allowed).
+  function setUnitOptions(sel, opts, placeholder, keep) {
+    const key = opts.map((o) => o[0]).join("|") + "#" + placeholder;
+    if (sel.dataset.unitKey === key) return; // same choices as before: leave the selection alone
+    sel.dataset.unitKey = key;
+    const wanted = keep !== undefined ? keep : sel.value;
+    sel.innerHTML = `<option value="" selected disabled hidden>${esc(placeholder || "Select unit")}</option>` + opts.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("");
+    sel.disabled = !opts.length;
+    if (wanted && opts.some(([v]) => v === wanted)) sel.value = wanted;
+    else if (opts.length === 1) sel.value = opts[0][0]; // only one choice, so pick it
+  }
+
+  async function syncUnits(form, s) {
+    const cfgs = [].concat(s.unitFor || []);
+    await Promise.all(cfgs.map((cfg) => syncOneUnit(form, s, cfg)));
+  }
+
+  async function syncOneUnit(form, s, cfg) {
+    const sel = field(form, cfg.unit), src = field(form, cfg.item), uf = fieldOf(s, cfg.unit);
+    if (!sel || !src || !uf) return;
+    const seq = (unitSeqs.get(cfg.unit) || 0) + 1;
+    unitSeqs.set(cfg.unit, seq);
+    const all = optsOf(uf).map((o) => (Array.isArray(o) ? o : [o, o]));
+    const item = lookupItem(src.value, cfg.byName);
+    if (!item) {
+      // A typed feed name that is not an inventory item keeps the full list; dropdowns wait for an item.
+      if (cfg.byName) setUnitOptions(sel, all, uf.placeholder);
+      else setUnitOptions(sel, [], "Select an item first");
+      return;
+    }
+    const keep = sel.value;
+    let names = null;
+    try { names = await unitsForItem(item); } catch { /* fall back to the full list below */ }
+    if (seq !== unitSeqs.get(cfg.unit)) return; // the user picked another item while this was loading
+    setUnitOptions(sel, names && names.length ? names.map((n) => [n, n]) : all, uf.placeholder, keep);
+    setError(cfg.unit, "");
+  }
+
   // preset (optional):
   //   { farm_type, farm_type_label } chosen in step 1 of "Create farm"
   //   { title, extra, defaults } used by "Sell Birds": a custom title, values merged into what is saved
@@ -209,7 +295,8 @@
 
     function mountFields(keepDate) {
       const s = cur();
-      $("#form-grid").innerHTML = s.fields.map(fieldHTML).join("");
+      // fieldsHTML draws a Quantity field and its Unit field as one row where the schema asks for it (joinUnit)
+      $("#form-grid").innerHTML = fieldsHTML(s);
       const today = localISO(new Date());
       $$('input[type="date"]', form).forEach((i) => {
         const def = fieldOf(s, i.name);
@@ -231,8 +318,17 @@
       refreshComputed(form, cur());
     }
 
+    // Set the first Unit choices once the starting values are in. A preset unit (Sell Birds) is kept when the item allows it.
+    syncUnits(form, cur());
+
     form.addEventListener("input", () => refreshComputed(form, cur()));
     form.addEventListener("change", () => refreshComputed(form, cur()));
+    // The item changed: refresh the Unit choices. Sales and Purchase use a dropdown (change event);
+    // the feed form is a text box, so it also reacts while the user types or picks a suggestion.
+    const watches = (name, byNameOnly) => [].concat(cur().unitFor || []).some((u) => u.item === name && (!byNameOnly || u.byName));
+    const onItemEvent = (e) => { if (watches(e.target.name)) syncUnits(form, cur()); };
+    form.addEventListener("change", onItemEvent);
+    form.addEventListener("input", (e) => { if (watches(e.target.name, true)) onItemEvent(e); });
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       if (saving) return;
@@ -257,6 +353,7 @@
         tabKey = b.dataset.mtab;
         $$("[data-mtab]", tabsEl).forEach((x) => x.setAttribute("aria-selected", String(x === b)));
         mountFields(date);
+        syncUnits(form, cur()); // the new tab may have its own Unit rules (Feed consumption)
       });
     }
 
@@ -305,11 +402,13 @@
     });
   }
 
+  // Shows or clears the error under a field. A Quantity + Unit row has two error lines in one .field,
+  // so the field stays red while either of them has text.
   function setError(name, msg) {
     const p = $("#e-" + name);
     if (p) p.textContent = msg || "";
-    const field = p && p.closest(".field");
-    if (field) field.classList.toggle("invalid", !!msg);
+    const box = p && p.closest(".field");
+    if (box) box.classList.toggle("invalid", [...box.querySelectorAll(":scope > .error")].some((el) => el.textContent));
     const input = $("#f-" + name);
     if (input) input.setAttribute("aria-invalid", msg ? "true" : "false");
   }
@@ -406,4 +505,3 @@
     clearTimeout(toast.t);
     toast.t = setTimeout(() => (root.innerHTML = ""), 3000);
   }
-

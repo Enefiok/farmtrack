@@ -383,3 +383,38 @@
     .tbl-menu button.danger { color: var(--error); }
     .tbl-menu button.on { color: var(--green); font-weight: 500; }
     @media (max-width: 640px) { .table-head { flex-wrap: wrap; } .head-tools { flex-wrap: wrap; } }
+
+/* ---------- Seamless Quantity + Unit: [ 5 ] [ Crate v ] ---------- */
+.qty-row,
+.input-group { display: flex; align-items: stretch; gap: 0; }
+
+.qty-row > .control,
+.input-group > .control { min-width: 0; }
+
+/* quantity box takes the remaining space */
+.qty-row > .control:first-child,
+.input-group > .control:first-child { flex: 1 1 auto; }
+
+/* unit box: fixed share of the row, pulled 1px left so the two borders become one divider line */
+.qty-row > .control:last-child,
+.input-group > .control:last-child { flex: 0 0 44%; margin-left: -1px; }
+
+/* round only the outer corners, keep the inner edges square */
+.qty-row > .control:first-child input,
+.input-group > .control:first-child input { border-radius: 12px 0 0 12px; }
+
+.qty-row > .control:last-child select,
+.input-group > .control:last-child select { border-radius: 0 12px 12px 0; }
+
+/* whichever half is focused sits on top, so its green border and ring are not covered */
+.qty-row > .control:focus-within,
+.input-group > .control:focus-within { z-index: 1; }
+
+/* red error border also stays on top */
+.field.invalid .qty-row > .control,
+.field.invalid .input-group > .control { z-index: 1; }
+
+/* remove the number spinner arrows so the box looks clean */
+.qty-row input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+.qty-row input[type="number"]::-webkit-outer-spin-button,
+.qty-row input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }

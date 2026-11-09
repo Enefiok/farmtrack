@@ -293,8 +293,12 @@
       id: p.id, flock: p.flock, date: p.event_date,
       collected: n(p.quantity_collected), damaged: n(p.quantity_damaged), saleable: n(p.quantity_saleable),
       notes: p.notes || "",
-      // How the eggs were packed (Loose eggs, Trays, Crates). The server stores it in "unit".
-      packaging: unitOf(p.unit != null ? p.unit : (p.packaging != null ? p.packaging : p.packaging_unit)),
+      // Each quantity now has its own unit (Egg, Tray, Crate). Older records only had a single "unit",
+      // so fall back to that when the new fields are missing.
+      unit_collected: unitOf(p.unit_collected != null ? p.unit_collected : p.unit),
+      unit_damaged: unitOf(p.unit_damaged != null ? p.unit_damaged : p.unit),
+      // kept so any existing table column that reads "packaging" still shows something
+      packaging: unitOf(p.unit_collected != null ? p.unit_collected : (p.unit != null ? p.unit : p.packaging)),
       recorded_by: p.created_by_name || "", created_at: p.created_at, created_by: p.created_by_name || ""
     };
   };
@@ -584,13 +588,14 @@
         flock: toId(v.flock),
         item: itemId,
         quantity_collected: Number(v.collected),
+        unit_collected: v.unit_collected,
         quantity_damaged: v.damaged === "" || v.damaged == null ? 0 : Number(v.damaged),
-        quantity_saleable: Number(v.saleable),
+        // With no damaged quantity the unit is irrelevant; fall back to the collected unit so the field is never empty.
+        unit_damaged: v.unit_damaged || v.unit_collected,
         event_date: v.date,
-        // How the eggs were packed (Loose eggs, Trays, Crates). Saved on the record as "unit".
-        unit: v.packaging || "Loose eggs",
         classification: "LIVE"
       };
+      // There is no "unit" and no "quantity_saleable" in the payload anymore: the backend calculates the saleable quantity.
       if (v.notes) body.notes = String(v.notes).trim();
       return body;
     }
@@ -839,10 +844,18 @@
         .map(function (p) { return { id: p.id, name: p.name || p.full_name || p.display_name || "" }; });
     },
     // Archived items are left out so they no longer appear in the Sales, Purchase and Sell Birds forms.
+    // The base unit is included because the Unit dropdown on the Purchase, Sales and Feed forms
+    // offers the item's base unit plus the units that have a conversion for it.
     listItems: async function (farmId) {
       return (await listAll(farmUrl("items", farmId)))
         .filter(function (i) { return i.is_active !== false; })
-        .map(function (i) { return { id: i.id, name: i.name || "", category: i.category || "" }; });
+        .map(function (i) {
+          return {
+            id: i.id, name: i.name || "", category: i.category || "",
+            base_unit: idOf(i.base_unit),
+            base_unit_name: i.base_unit_name || i.base_unit_display || nameOf(i.base_unit) || ""
+          };
+        });
     },
 
     // ---------- Inventory: items, units and unit conversions ----------
@@ -857,14 +870,19 @@
         .map(normInventoryItem)
         .filter(function (i) { return i.is_active; });
     },
-    // v: { name, category, base_unit, is_stock_tracked }
+    // v: { name, category, base_unit, is_stock_tracked, initial_stock? }
+    // initial_stock is the optional opening stock, counted in the item's base unit.
     createItem: function (farmId, v) {
-      return request("POST", farmUrl("items", farmId), {
+      const body = {
         name: String(v.name).trim(),
         category: v.category,
         base_unit: toId(v.base_unit),
         is_stock_tracked: !!v.is_stock_tracked
-      });
+      };
+      if (v.initial_stock != null && v.initial_stock !== "" && Number(v.initial_stock) > 0) {
+        body.initial_stock = Number(v.initial_stock);
+      }
+      return request("POST", farmUrl("items", farmId), body);
     },
     // v: { name, category, base_unit, is_stock_tracked }. Only the fields you pass are sent.
     // The backend rejects a base_unit change (400) once the item has been used in transactions.
@@ -894,6 +912,19 @@
         factor: Number(v.factor),
         is_base_unit: !!v.is_base_unit
       });
+    },
+    // v: { unit, factor, is_base_unit }. Only the fields you pass are sent.
+    // PATCH /api/farms/{farm}/items/{item}/conversions/{id}/
+    updateConversion: function (farmId, itemId, conversionId, v) {
+      const body = {};
+      if (v.unit != null) body.unit = toId(v.unit);
+      if (v.factor != null) body.factor = Number(v.factor);
+      if (v.is_base_unit != null) body.is_base_unit = !!v.is_base_unit;
+      return request("PATCH", farmUrl("items", farmId) + encodeURIComponent(itemId) + "/conversions/" + encodeURIComponent(conversionId) + "/", body);
+    },
+    // DELETE /api/farms/{farm}/items/{item}/conversions/{id}/
+    deleteConversion: function (farmId, itemId, conversionId) {
+      return request("DELETE", farmUrl("items", farmId) + encodeURIComponent(itemId) + "/conversions/" + encodeURIComponent(conversionId) + "/");
     },
 
     // Dropdown data must never stop the whole app from loading, so a failed list becomes an empty one.

@@ -10,8 +10,13 @@
   const list = (...a) => a;
   const UNITS = list("Egg", "Tray", "Crate", "Bird", "Bag", "Kg", "Litre", "Piece");
   // Units offered on the Sales form (what the goods are sold in) and on the Purchase form (what they are bought in).
+  // These are the fallback lists. Once an item is chosen, the Unit dropdown is narrowed to that item's
+  // base unit plus the units that have a conversion for it (see unitFor on the schemas below).
   const SALE_UNITS = [["Crate", "Crate"], ["Tray", "Tray"], ["Egg", "Egg"], ["Bag", "Bag"], ["Kg", "Kg"]];
   const PURCHASE_UNITS = [["Bag", "Bag"], ["Bottle", "Bottle"], ["Kg", "Kg"], ["Litre", "Litre"], ["Crate", "Crate"], ["Tray", "Tray"], ["Piece", "Piece"]];
+  // Units offered on the Production form for eggs collected and eggs damaged. Fallback only;
+  // once an item is chosen, each Unit dropdown follows that item's base unit and conversions.
+  const PRODUCTION_UNITS = [["Egg", "Egg"], ["Tray", "Tray"], ["Crate", "Crate"]];
   const fieldOf = (s, name) => allFields(s).find((f) => f.name === name);
   const unitQty = (r) => `${fmtInt(r.quantity)}${r.unit ? " " + r.unit : ""}`;
 
@@ -97,7 +102,12 @@
     },
     production: {
       title: "Production Records", sub: "Record eggs collected from a flock", saved: "Production record saved.",
-      errorMap: { quantity_collected: "collected", quantity_damaged: "damaged", quantity_saleable: "saleable", event_date: "date", unit: "packaging" },
+      errorMap: { quantity_collected: "collected", quantity_damaged: "damaged", event_date: "date" },
+      // Each quantity gets its own Unit dropdown, both following the chosen Item.
+      unitFor: [
+        { item: "item", unit: "unit_collected" },
+        { item: "item", unit: "unit_damaged" },
+      ],
       fields: [
         { name: "date", label: "Egg Collection Date", type: "date", required: true },
         { name: "flock", label: "Flock", type: "select", placeholder: "Enter flock", emptyText: "Add a flock first", required: true, options: flockOptions },
@@ -110,27 +120,33 @@
             const eggs = items.filter(isEggItem);
             return (eggs.length ? eggs : items).map((i) => [i.id, i.name]);
           } },
-        { name: "collected", label: "Eggs Collected", type: "number", placeholder: "Enter amount of eggs", required: true, min: 0, integer: true },
-        { name: "damaged", label: "Damaged/Broken Eggs", type: "number", placeholder: "Enter broken eggs", min: 0, integer: true },
-        { name: "saleable", label: "Saleable Quantity", type: "computed", fmt: (v) => fmtInt(v) },
-        // How the eggs were packed. Sent to the backend as "unit". Unit conversions (eggs per tray or crate)
-        // are set on the Item, not typed on every record.
-        { name: "packaging", label: "Packaging/Unit Conversions", type: "select", placeholder: "Enter unit", required: true, options: list("Loose eggs", "Trays", "Crates") },
+        // joinUnit: each quantity and its Unit are drawn as one row: [ 5 ] [ Crates v ]
+        { name: "collected", label: "Eggs Collected", type: "number", placeholder: "Enter amount", required: true, min: 0, joinUnit: "unit_collected" },
+        { name: "unit_collected", label: "Collected unit", type: "select", placeholder: "Select unit", required: true, options: PRODUCTION_UNITS },
+        { name: "damaged", label: "Damaged/Broken Eggs", type: "number", placeholder: "Enter amount", min: 0, joinUnit: "unit_damaged" },
+        // Only required once a damaged quantity is typed.
+        { name: "unit_damaged", label: "Damaged unit", type: "select", placeholder: "Select unit", options: PRODUCTION_UNITS,
+          when: (v) => v.damaged !== "" && v.damaged != null },
         { name: "recorded_by", label: "Recorded by", type: "readonly", value: () => state.user.name },
         { name: "notes", label: "Notes", type: "textarea", placeholder: "Write Something" },
       ],
-      calc: (v) => ({ saleable: Math.max(0, num(v.collected) - num(v.damaged)) }),
-      check: (v) => (num(v.damaged) > num(v.collected) ? { damaged: "Damaged eggs cannot be more than eggs collected." } : {}),
+      // Saleable Quantity is calculated by the backend, so it is no longer shown or sent from the form.
+      // Same-unit sanity check only; mixed units (2 Crates vs 2 Eggs) are validated by the backend.
+      check: (v) => (v.unit_collected && v.unit_collected === v.unit_damaged && num(v.damaged) > num(v.collected)
+        ? { damaged: "Damaged eggs cannot be more than eggs collected." } : {}),
     },
     sales: {
       title: "Sales Records", sub: "Record a sale", saved: "Sale record saved.",
       errorMap: { event_date: "date", party: "customer", lines: "product" },
+      // The Unit dropdown follows the chosen Product: its base unit plus the units that have a conversion.
+      unitFor: { item: "product", unit: "unit" },
       fields: [
         { name: "date", label: "Sale Date", type: "date", required: true },
         // Type a new name or pick an existing customer. A new name is saved as a customer automatically.
         { name: "customer", label: "Customer", type: "text", placeholder: "Enter or choose a customer", required: true, suggest: () => state.lookups.customers.map((c) => c.name) },
         { name: "product", label: "Product", type: "select", placeholder: "Enter product", emptyText: "No products yet. Record egg production first.", required: true, options: () => state.lookups.items.map((i) => [i.id, i.name]) },
-        { name: "quantity", label: "Quantities", type: "number", placeholder: "Enter quantity", required: true, min: 0.01 },
+        // joinUnit: this field and the Unit field below it are drawn as one row: [ 10 ] [ Crate v ]
+        { name: "quantity", label: "Quantities", type: "number", placeholder: "Enter quantity", required: true, min: 0.01, joinUnit: "unit" },
         // What the goods are sold in. Sent inside the sale line.
         { name: "unit", label: "Unit", type: "select", placeholder: "Select unit", required: true, options: SALE_UNITS },
         { name: "price", label: "Prices", type: "number", placeholder: "Enter price", required: true, min: 0, step: "0.01" },
@@ -159,6 +175,8 @@
       title: "Purchase Records", sub: "Record goods bought for the farm", saved: "Purchase record saved.",
       // The backend names: party = the supplier, lines = the item bought
       errorMap: { event_date: "date", party: "supplier", lines: "item" },
+      // The Unit dropdown follows the chosen Item: its base unit plus the units that have a conversion.
+      unitFor: { item: "item", unit: "unit" },
       fields: [
         { name: "date", label: "Purchase Date", type: "date", required: true },
         // Type a new name or pick an existing supplier. A new name is saved as a supplier automatically.
@@ -166,7 +184,8 @@
         // Sent to the backend as receipt_status. New purchases default to Received.
         { name: "receipt_status", label: "Receipt Status", type: "select", placeholder: "Select status", required: true, default: "RECEIVED", options: [["RECEIVED", "Received"], ["ORDERED", "Ordered"]] },
         { name: "item", label: "Item", type: "select", placeholder: "Enter item", emptyText: "No items yet. Add an item on the server first.", required: true, options: () => state.lookups.items.map((i) => [i.id, i.name]) },
-        { name: "quantity", label: "Quantity", type: "number", placeholder: "Enter quantity", required: true, min: 0.01 },
+        // joinUnit: this field and the Unit field below it are drawn as one row: [ 10 ] [ Bag v ]
+        { name: "quantity", label: "Quantity", type: "number", placeholder: "Enter quantity", required: true, min: 0.01, joinUnit: "unit" },
         // What the goods are bought in (for example Bags of feed or Bottles of medicine). Sent inside the purchase line.
         { name: "unit", label: "Unit", type: "select", placeholder: "Select unit", required: true, options: PURCHASE_UNITS },
         { name: "unit_cost", label: "Unit Cost", type: "number", placeholder: "Enter unit cost", required: true, min: 0, step: "0.01" },
@@ -209,10 +228,19 @@
       centered: true,
       tabs: [
         { key: "feed", label: "Feed consumption", code: "FEED_CONSUMPTION",
+          // The feed item is a text box, so the Unit dropdown is matched on the typed name (byName).
+          // A name that is not an inventory item keeps the full unit list.
+          unitFor: { item: "feed_item", unit: "unit", byName: true },
           fields: [
             { name: "date", label: "Date", type: "date", required: true },
-            { name: "feed_item", label: "Feed item", type: "text", placeholder: "Enter feed item", required: true, suggest: list("Layer mash", "Grower mash", "Starter feed", "Maize", "Soya") },
-            { name: "quantity", label: "Quantity", type: "number", placeholder: "Enter quantity", required: true, min: 0.01 },
+            // Suggests the farm's own items. Falls back to the common feed names while the item list is empty.
+            { name: "feed_item", label: "Feed item", type: "text", placeholder: "Enter feed item", required: true,
+              suggest: () => {
+                const names = ((state.lookups && state.lookups.items) || []).map((i) => i.name).filter(Boolean);
+                return names.length ? names : list("Layer mash", "Grower mash", "Starter feed", "Maize", "Soya");
+              } },
+            // joinUnit: this field and the Unit field below it are drawn as one row: [ 10 ] [ Bag v ]
+            { name: "quantity", label: "Quantity", type: "number", placeholder: "Enter quantity", required: true, min: 0.01, joinUnit: "unit" },
             { name: "unit", label: "Unit", type: "select", placeholder: "Enter unit", required: true, options: UNITS },
             { name: "flock", label: "Flock", type: "select", placeholder: "Enter flock", emptyText: "No flocks yet", options: flockOptions },
             { name: "notes", label: "Notes", type: "textarea", placeholder: "Write Something" },
@@ -294,6 +322,8 @@
     return birds.length ? birds : all;
   };
 
+  // Sell Birds copies the Sales schema, so it also gets unitFor and joinUnit.
+  // BIRD_UNITS is only the fallback list; the Unit dropdown follows the chosen bird item.
   SCHEMAS.sellbirds = {
     ...SCHEMAS.sales,
     title: "Sell Birds",

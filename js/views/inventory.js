@@ -37,8 +37,11 @@
 
   // The farm-wide item list that feeds the Sales, Purchase and Sell Birds forms comes from lookups, so refresh it too.
   async function refreshLookups() {
+    // The Unit dropdown on the forms caches each item's units. Items or conversions just changed, so drop that cache.
+    // (clearUnitCache lives in forms.js; the typeof check keeps this working until that file is updated.)
+    if (typeof clearUnitCache === "function") clearUnitCache();
     if (DEV) {
-      state.lookups.items = state.inventory.items.map((i) => ({ id: i.id, name: i.name, category: i.category }));
+      state.lookups.items = state.inventory.items.map((i) => ({ id: i.id, name: i.name, category: i.category, base_unit_name: i.base_unit_name }));
       return;
     }
     try {
@@ -168,7 +171,10 @@
       { name: "category", label: "Category", type: "select", placeholder: "Select category", required: true, options: ITEM_CATEGORIES },
       { name: "base_unit", label: "Base Unit", type: "select", placeholder: "Select base unit", emptyText: "No units on the server yet", required: true, options: units.map((u) => [u.id, unitLabel(u)]) },
     ];
-    const schema = { fields: defs };
+    // Only when adding: the opening stock, counted in the item's base unit.
+    const stockDef = { name: "initial_stock", label: "Initial Stock (Optional)", type: "number", placeholder: "0", min: 0, step: "any" };
+    const allDefs = editing ? defs : [...defs, stockDef];
+    const schema = { fields: allDefs };
     const saveLabel = editing ? "Save changes" : "Save item";
     $("#modal-root").innerHTML = `
       <div class="backdrop" id="backdrop">
@@ -183,6 +189,7 @@
                 <label style="display:flex;align-items:center;gap:10px;cursor:pointer"><input type="checkbox" id="f-is_stock_tracked" name="is_stock_tracked" checked style="width:18px;height:18px;accent-color:#147a3a"><span>Track stock for this item</span></label>
                 <p class="error" id="e-is_stock_tracked" role="alert"></p>
               </div>
+              ${editing ? "" : fieldHTML(stockDef)}
             </div>
             <p class="form-error" id="form-error" role="alert"></p>
             <div class="actions"><button class="btn" id="save-btn" type="submit" data-label="${saveLabel}">${saveLabel}</button></div>
@@ -205,18 +212,22 @@
       if (saving) return;
       const v = readValues(form, schema);
       const tracked = field(form, "is_stock_tracked").checked;
-      [...defs.map((d) => d.name), "is_stock_tracked"].forEach((n) => setError(n, ""));
+      [...allDefs.map((d) => d.name), "is_stock_tracked"].forEach((n) => setError(n, ""));
       $("#form-error").textContent = "";
       const errs = validate(v, schema);
       const dupe = state.inventory.items.some((i) => (!editing || String(i.id) !== String(itemToEdit.id)) && i.name.trim().toLowerCase() === String(v.name).trim().toLowerCase());
       if (!errs.name && dupe) errs.name = "An item with this name already exists.";
-      const bad = defs.map((d) => d.name).filter((n) => errs[n]);
+      // An opening stock only makes sense for an item whose stock is tracked.
+      const wantsStock = !editing && v.initial_stock !== "" && num(v.initial_stock) > 0;
+      if (wantsStock && !tracked && !errs.initial_stock) errs.initial_stock = "Turn on stock tracking to set an opening stock.";
+      const bad = allDefs.map((d) => d.name).filter((n) => errs[n]);
       if (bad.length) {
         bad.forEach((n) => setError(n, errs[n]));
         const el = $("#f-" + bad[0]); if (el) el.focus();
         return;
       }
       const payload = { name: v.name, category: v.category, base_unit: v.base_unit, is_stock_tracked: tracked };
+      if (wantsStock) payload.initial_stock = v.initial_stock;
       const btn = $("#save-btn"), errEl = $("#form-error");
       saving = true; btn.disabled = true; btn.textContent = "Saving…";
       try {
@@ -224,7 +235,7 @@
           const u = units.find((x) => String(x.id) === String(v.base_unit));
           const local = { ...payload, base_unit_name: u ? u.name : "" };
           if (editing) Object.assign(itemToEdit, local);
-          else state.inventory.items.unshift({ id: uid(), ...local });
+          else state.inventory.items.unshift({ id: uid(), ...local, current_stock: payload.initial_stock || 0 });
         } else if (editing) {
           await AgroAPI.updateItem(state.farmId, itemToEdit.id, payload);
         } else {
@@ -239,7 +250,7 @@
         let msg = "We couldn't save this item. Please try again.";
         if (err && err.name === "ApiError") {
           const entries = Object.entries(err.fields || {}).map(([n, m]) => [n, errText(m)]);
-          const known = entries.filter(([n]) => defs.some((d) => d.name === n) || n === "is_stock_tracked");
+          const known = entries.filter(([n]) => allDefs.some((d) => d.name === n) || n === "is_stock_tracked");
           const rest = entries.filter((x) => !known.includes(x));
           known.forEach(([n, m]) => setError(n, m));
           if (known.length) { const el = $("#f-" + known[0][0]); if (el) el.focus(); }
@@ -277,7 +288,7 @@
     modalTrigger = trigger || document.activeElement;
     const units = state.inventory.units;
     const baseName = item.base_unit_name || (units.find((u) => String(u.id) === String(item.base_unit)) || {}).name || "base unit";
-    let convs = [], loadErr = "";
+    let convs = [], loadErr = "", editing = null; // editing = the conversion being edited, or null when adding
     const devKey = `dev-conv-${item.id}`;
     state.inventory.devConv = state.inventory.devConv || {};
 
@@ -291,8 +302,17 @@
       if (loadErr) return `<p class="empty-line" style="padding:8px 0 0" role="alert">${esc(loadErr)}</p>`;
       if (convs === null) return `<div class="empty-line" style="padding:8px 0 0">Loading…</div>`;
       if (!convs.length) return `<p class="empty-line" style="padding:8px 0 0">No conversions yet. Without one, you cannot record this item in anything but its base unit.</p>`;
-      return `<div class="table-wrap mini-lines"><table><thead><tr><th>Conversion</th><th>Unit</th><th class="num">Factor</th><th>Base unit</th></tr></thead><tbody>${convs.map((c) =>
-        `<tr><td>1 ${esc(c.unit_name || "unit")} = ${esc(fmtQty(c.factor))} ${esc(baseName)}</td><td>${esc(c.unit_name || "—")}</td><td class="num">${esc(fmtQty(c.factor))}</td><td>${c.is_base_unit ? "Yes" : "No"}</td></tr>`).join("")}</tbody></table></div>`;
+      // If your icon set has no "trash", the word "Delete" is shown instead of an empty button.
+      const trash = icon("trash", 15) || "Delete";
+      return `<div class="table-wrap mini-lines"><table><thead><tr><th>Conversion</th><th>Unit</th><th class="num">Factor</th><th>Base unit</th><th class="num">Actions</th></tr></thead><tbody>${convs.map((c) => {
+        const mine = editing && String(editing.id) === String(c.id);
+        const nm = esc(c.unit_name || "unit");
+        return `<tr${mine ? ' class="is-editing" style="background:rgba(20,122,58,.08)"' : ""}><td>1 ${nm} = ${esc(fmtQty(c.factor))} ${esc(baseName)}</td><td>${esc(c.unit_name || "—")}</td><td class="num">${esc(fmtQty(c.factor))}</td><td>${c.is_base_unit ? "Yes" : "No"}</td>
+          <td class="num"><span style="display:inline-flex;gap:6px;align-items:center">
+            <button class="icon-btn square row-btn" type="button" data-conv-edit="${esc(c.id)}" title="Edit" aria-label="Edit the ${nm} conversion">${icon("edit", 15)}</button>
+            <button class="icon-btn square row-btn" type="button" data-conv-delete="${esc(c.id)}" title="Delete" aria-label="Delete the ${nm} conversion">${trash}</button>
+          </span></td></tr>`;
+      }).join("")}</tbody></table></div>`;
     };
     const paintList = () => { const el = $("#conv-list"); if (el) el.innerHTML = listHTML(); };
 
@@ -304,7 +324,7 @@
           <p class="sub">${esc(item.name)}: base unit is ${esc(baseName)}. Set how many ${esc(baseName)} each unit holds. Nothing is assumed, so a crate is only as big as you say it is.</p>
           <h3 class="dv-h">Existing conversions</h3>
           <div id="conv-list">${listHTML()}</div>
-          <h3 class="dv-h">Add new conversion</h3>
+          <h3 class="dv-h" id="conv-form-title">Add new conversion</h3>
           <form id="conv-form" novalidate>
             <div class="form-grid" id="form-grid">
               ${defs.map(fieldHTML).join("")}
@@ -314,12 +334,37 @@
               </div>
             </div>
             <p class="form-error" id="form-error" role="alert"></p>
-            <div class="actions"><button class="btn" id="save-btn" type="submit" data-label="Add conversion">Add conversion</button><button class="btn ghost" type="button" data-close>Close</button></div>
+            <div class="actions"><button class="btn" id="save-btn" type="submit" data-label="Add conversion">Add conversion</button><button class="btn ghost" type="button" id="cancel-edit" hidden>Cancel edit</button><button class="btn ghost" type="button" data-close>Close</button></div>
           </form>
         </div>
       </div>`;
     document.body.style.overflow = "hidden";
     const form = $("#conv-form");
+
+    // Switches the form between "add" (conv = null) and "edit this conversion".
+    const setMode = (conv) => {
+      editing = conv || null;
+      form.reset();
+      const fac = field(form, "factor");
+      fac.readOnly = false;
+      defs.forEach((d) => setError(d.name, ""));
+      setError("is_base_unit", "");
+      $("#form-error").textContent = "";
+      if (conv) {
+        field(form, "unit").value = String(conv.unit);
+        fac.value = String(conv.factor);
+        field(form, "is_base_unit").checked = !!conv.is_base_unit;
+        fac.readOnly = !!conv.is_base_unit;
+      }
+      $("#conv-form-title").textContent = conv ? "Edit conversion" : "Add new conversion";
+      const sb = $("#save-btn");
+      sb.dataset.label = conv ? "Save changes" : "Add conversion";
+      sb.textContent = sb.dataset.label;
+      $("#cancel-edit").hidden = !conv;
+      paintList();
+      if (conv) { fac.focus(); form.scrollIntoView({ block: "nearest" }); }
+    };
+    $("#cancel-edit").addEventListener("click", () => setMode(null));
 
     // Ticking "base unit" fixes the factor at 1 and picks the item's own base unit when it is known.
     form.addEventListener("change", (e) => {
@@ -340,6 +385,31 @@
     paintList();
     fetchList();
 
+    // Delete: confirm, call the API, then refresh this list, the Inventory table and the form dropdowns.
+    const removeConversion = async (c) => {
+      if (!confirm(`Are you sure you want to delete the conversion 1 ${c.unit_name || "unit"} = ${fmtQty(c.factor)} ${baseName}?`)) return;
+      try {
+        if (DEV) state.inventory.devConv[devKey] = (state.inventory.devConv[devKey] || []).filter((x) => String(x.id) !== String(c.id));
+        else await AgroAPI.deleteConversion(state.farmId, item.id, c.id);
+        if (editing && String(editing.id) === String(c.id)) setMode(null);
+        await fetchList();
+        await loadInventory(true);
+        await refreshLookups();
+        renderView();
+        toast("Conversion deleted.");
+      } catch (err) {
+        toast((err && err.message) || "We couldn't delete this conversion. Please try again.");
+      }
+    };
+
+    // The Edit and Delete buttons sit inside #conv-list, which is repainted, so listen on the container.
+    $("#conv-list").addEventListener("click", (e) => {
+      const ed = e.target.closest("[data-conv-edit]"), del = e.target.closest("[data-conv-delete]");
+      const find = (id) => (convs || []).find((c) => String(c.id) === String(id));
+      if (ed) { const c = find(ed.dataset.convEdit); if (c) setMode(c); }
+      else if (del) { const c = find(del.dataset.convDelete); if (c) removeConversion(c); }
+    });
+
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (saving) return;
@@ -349,7 +419,7 @@
       setError("is_base_unit", "");
       $("#form-error").textContent = "";
       const errs = validate(v, schema);
-      if (!errs.unit && Array.isArray(convs) && convs.some((c) => String(c.unit) === String(v.unit))) errs.unit = "This unit already has a conversion for this item.";
+      if (!errs.unit && Array.isArray(convs) && convs.some((c) => String(c.unit) === String(v.unit) && (!editing || String(c.id) !== String(editing.id)))) errs.unit = "This unit already has a conversion for this item.";
       const bad = defs.map((d) => d.name).filter((n) => errs[n]);
       if (bad.length) {
         bad.forEach((n) => setError(n, errs[n]));
@@ -357,21 +427,28 @@
         return;
       }
       const btn = $("#save-btn"), errEl = $("#form-error");
+      const wasEditing = !!editing;
       saving = true; btn.disabled = true; btn.textContent = "Saving…";
       try {
+        const body = { unit: v.unit, factor: isBase ? 1 : v.factor, is_base_unit: isBase };
         if (DEV) {
           const u = units.find((x) => String(x.id) === String(v.unit));
-          state.inventory.devConv[devKey] = [...(state.inventory.devConv[devKey] || []), { id: uid(), unit: v.unit, unit_name: u ? u.name : "", factor: v.factor, is_base_unit: isBase }];
+          const row = { unit: v.unit, unit_name: u ? u.name : "", factor: body.factor, is_base_unit: isBase };
+          const list = state.inventory.devConv[devKey] || [];
+          state.inventory.devConv[devKey] = wasEditing
+            ? list.map((c) => (String(c.id) === String(editing.id) ? { ...c, ...row } : c))
+            : [...list, { id: uid(), ...row }];
+        } else if (wasEditing) {
+          await AgroAPI.updateConversion(state.farmId, item.id, editing.id, body);
         } else {
-          await AgroAPI.createConversion(state.farmId, item.id, { unit: v.unit, factor: isBase ? 1 : v.factor, is_base_unit: isBase });
+          await AgroAPI.createConversion(state.farmId, item.id, body);
         }
         await fetchList();          // update the table of conversions inside this window
+        setMode(null);              // back to "add" mode with an empty form
         await loadInventory(true);  // silent reload, the Inventory table stays visible
         await refreshLookups();     // update the dropdowns in the Sales, Purchase and Sell Birds forms
         renderView();
-        form.reset();
-        field(form, "factor").readOnly = false;
-        toast("Conversion added.");
+        toast(wasEditing ? "Conversion updated." : "Conversion added.");
         const first = field(form, "unit"); if (first) first.focus();
       } catch (err) {
         let msg = "We couldn't save this conversion. Please try again.";
