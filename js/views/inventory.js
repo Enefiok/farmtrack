@@ -137,7 +137,7 @@
       const stockVal = i.is_stock_tracked && i.current_stock != null ? fmtQty(i.current_stock) : "—";
       const mid = `inv-menu-${i.id}`;
       return `<tr>
-      <td class="item-name">${esc(i.name)}</td><td><span class="chip cat-${esc(String(i.category).toLowerCase())}">${esc(categoryLabel(i.category))}</span></td><td>${esc(invUnitName(i))}</td><td><span class="pill ${i.is_stock_tracked ? "on" : "off"}">${i.is_stock_tracked ? "Yes" : "No"}</span></td>
+      <td class="item-name">${esc(i.name)}</td><td><span class="cat-chip cat-${esc(String(i.category).toLowerCase())}">${esc(categoryLabel(i.category))}</span></td><td>${esc(invUnitName(i))}</td><td><span class="stock-pill ${i.is_stock_tracked ? "on" : "off"}">${i.is_stock_tracked ? "Yes" : "No"}</span></td>
       <td class="num">${esc(stockVal)}</td>
       <td>${esc(fmtStamp(i.updated_at))}</td>
       <td class="num"><div class="menu-wrap" style="display:inline-block"><button class="icon-btn square row-btn" type="button" data-menu="${mid}" data-fixed aria-haspopup="true" aria-label="Actions for ${esc(i.name)}">${icon("more", 16)}</button>
@@ -152,7 +152,7 @@
       <button class="tool-btn" type="button" data-action="export-inventory" aria-label="Download as CSV">${icon("download", 16)}</button>
     </div>`;
     const empty = state.query.trim() ? `No items match "${esc(state.query)}".` : "No items match these filters.";
-    return head + inventoryStats(inv.items) + `<section class="card table-card">
+    return head + inventoryStats(inv.items) + \<section class="card table-card inv-table">
       <div class="table-head"><div><h3>Inventory items</h3><p class="sub-line">Showing the latest records for ${esc((farm() || {}).name || "your farm")}</p></div>${tools}</div>
       ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Base unit</th><th>Stock tracked</th><th class="num">Current Stock</th><th>Last updated</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">${empty}</div>`}
     </section>`;
