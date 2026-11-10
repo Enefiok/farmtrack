@@ -152,7 +152,7 @@
       <button class="tool-btn" type="button" data-action="export-inventory" aria-label="Download as CSV">${icon("download", 16)}</button>
     </div>`;
     const empty = state.query.trim() ? `No items match "${esc(state.query)}".` : "No items match these filters.";
-    return head + inventoryStats(inv.items) + \<section class="card table-card inv-table">
+    return head + inventoryStats(inv.items) + `<section class="card table-card inv-table">
       <div class="table-head"><div><h3>Inventory items</h3><p class="sub-line">Showing the latest records for ${esc((farm() || {}).name || "your farm")}</p></div>${tools}</div>
       ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Base unit</th><th>Stock tracked</th><th class="num">Current Stock</th><th>Last updated</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">${empty}</div>`}
     </section>`;
