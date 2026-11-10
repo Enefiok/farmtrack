@@ -14,6 +14,42 @@
   const adjustBtn = (type, id) => `<button class="btn ghost" type="button" data-action="adjust-record" data-rtype="${type}" data-id="${esc(id)}">${icon("edit", 15)}Adjust</button>`;
 
   const ADJUST_REASONS = [["MISTAKE", "Mistake"], ["LOSS", "Loss"], ["DISCREPANCY", "Discrepancy"], ["THEFT", "Theft"], ["OTHER", "Other"]];
+
+  // ----- Smart Switch -----
+  // MISTAKE (and OTHER) edit the original record, then write the adjustment log.
+  // These reasons leave the original record untouched and move stock directly instead.
+  const STOCK_REASONS = ["LOSS", "THEFT", "DISCREPANCY", "DAMAGE"];
+  // Record types that carry an item, and the quantity fields on them that a stock movement makes sense for.
+  const STOCK_TYPES = ["sales", "purchase", "production"];
+  const QTY_KEYS = ["quantity", "quantity_collected", "quantity_damaged", "quantity_saleable"];
+  const todayISO = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  // Builds the body for AgroAPI.recordStockAdjustment, or null if the item can't be found.
+  function stockPayload(type, rec, sp, v, oldValue) {
+    const line = (Array.isArray(rec.lines) && rec.lines[0]) || {};
+    const itemId = type === "production" ? rec.item : line.item;
+    if (itemId == null || itemId === "") return null;
+    const unit = type === "production"
+      ? (sp.key === "quantity_damaged" ? rec.unit_damaged : rec.unit_collected)
+      : (line.unit || rec.unit || "");
+    const newV = Number(v.new_value), oldV = num(oldValue);
+    return {
+      // Lets the backend write the adjustment log entry itself (so the frontend does not call adjustments/create/).
+      target_model: ADJUST[type].model,
+      target_id: rec.id,
+      item_id: itemId,
+      quantity: Math.abs(newV - oldV),
+      unit: unit || "",
+      reason: v.reason,
+      notes: v.notes,
+      event_date: todayISO(),
+      // Discrepancy can go either way; Loss, Theft and Damage always take stock out.
+      direction: v.reason === "DISCREPANCY" && newV > oldV ? "IN" : "OUT",
+    };
+  }
+
   // For each record type: the name the backend knows it by, and the fields a user may correct.
   // key = the field name sent to the backend, ui = where the current value lives on the row in this app,
   // kind = int | decimal | money | text | select
@@ -182,6 +218,19 @@
         const same = typeof v.new_value === "number" ? v.new_value === num(oldOf(sp)) : String(v.new_value) === String(oldOf(sp) ?? "");
         if (same) errs.new_value = "The new value is the same as the current value.";
       }
+
+      // Smart Switch: Loss / Theft / Discrepancy move stock instead of editing the record.
+      const isStock = STOCK_REASONS.includes(v.reason);
+      let stockBody = null;
+      if (isStock && sp && !errs.new_value) {
+        if (!STOCK_TYPES.includes(type) || !QTY_KEYS.includes(sp.key)) {
+          errs.reason = "Loss, theft and discrepancy only apply to quantity corrections on sales, purchases or production. Choose Mistake to edit this record.";
+        } else {
+          stockBody = stockPayload(type, rec, sp, v, oldOf(sp));
+          if (!stockBody) errs.reason = "This record has no item on file, so stock can't be adjusted.";
+        }
+      }
+
       const bad = defs.map((d) => d.name).filter((n) => errs[n]);
       if (bad.length) {
         bad.forEach((n) => setError(n, errs[n]));
@@ -197,16 +246,60 @@
       const btn = $("#save-btn"), errEl = $("#form-error");
       saving = true; btn.disabled = true; btn.textContent = "Saving…";
       try {
-        // For a sale, change the sale itself first. The backend reverses the old stock and applies the new one.
-        // updateSaleField checks everything before sending, so a refusal here means nothing was changed
-        // and no adjustment log is written.
-        if (type === "sales") {
-          await AgroAPI.updateSaleField(state.farmId, rec, sp.key, v.new_value);
+        if (isStock) {
+          // Loss / Theft / Discrepancy: leave the original record untouched and move stock.
+          // The backend only moves the stock now; it does NOT write the history entry.
+          await AgroAPI.recordStockAdjustment(state.farmId, stockBody);
+          // Then write the history entry. createAdjustment is used (not api.adjust) because it only
+          // writes the log; api.adjust may also edit the original record, which must stay untouched here.
+          // The stock has already moved at this point, so a failed log must not look like a failed save:
+          // the user would retry and the stock would be adjusted twice.
+          let logSaved = true;
+          try {
+            await AgroAPI.createAdjustment(state.farmId, payload);
+          } catch (logErr) {
+            logSaved = false;
+            console.warn("Stock moved but the adjustment log failed:", logErr.status, logErr.data);
+          }
+          // Reload the list so the Adjustment history shows the new entry without a page refresh.
+          try {
+            state.data.adjustment = await AgroAPI.listAdjustments(state.farmId);
+          } catch (reloadErr) {
+            console.warn("Could not reload adjustments:", reloadErr.status, reloadErr.data);
+          }
+          closeModal();
+          toast(logSaved ? "Stock adjusted and adjustment saved." : "Stock adjusted, but the history entry could not be saved.");
+        } else {
+          // Mistake / Other: edit the original record. The backend reverses the old stock and applies the new one.
+          // Each update method checks everything before sending, so a refusal here means nothing was changed
+          // and no adjustment log is written.
+          if (type === "sales") {
+            await AgroAPI.updateSaleField(state.farmId, rec, sp.key, v.new_value);
+          } else if (type === "purchase") {
+            await AgroAPI.updatePurchaseField(state.farmId, rec, sp.key, v.new_value);
+          } else if (type === "production") {
+            await AgroAPI.updateProductionField(state.farmId, rec, sp.key, v.new_value);
+          }
+          // Then write the adjustment log, exactly as before, for every record type.
+          await api.adjust(rec, sp, payload);
+          // The backend has changed the original record, but the app still holds the old row, so the table
+          // would show the old number until a page refresh. Reload that list and the adjustment list.
+          // The save has already succeeded, so a failed reload must not look like a failed save.
+          try {
+            if (type === "sales") state.data.sales = await AgroAPI.listSales(state.farmId);
+            else if (type === "purchase") state.data.purchase = await AgroAPI.listPurchases(state.farmId);
+            else if (type === "production") state.data.production = await AgroAPI.listProduction(state.farmId);
+            if (type === "sales" || type === "purchase" || type === "production") {
+              state.data.adjustment = await AgroAPI.listAdjustments(state.farmId);
+            }
+          } catch (reloadErr) {
+            console.warn("Could not reload after adjustment:", reloadErr.status, reloadErr.data);
+          }
+          closeModal();
+          toast(type === "sales" ? "Sale updated and adjustment saved."
+            : type === "purchase" || type === "production" ? "Record updated and adjustment saved."
+            : "Adjustment saved.");
         }
-        // Then write the adjustment log, exactly as before, for every record type.
-        await api.adjust(rec, sp, payload);
-        closeModal();
-        toast(type === "sales" ? "Sale updated and adjustment saved." : "Adjustment saved.");
         renderView();
       } catch (err) {
         let msg = "We couldn't save this adjustment. Please try again.";

@@ -35,6 +35,8 @@
       openingPosition: "/api/farms/{farm}/opening-position/",
       adjustments: "/api/farms/{farm}/adjustments/",
       adjustmentsCreate: "/api/farms/{farm}/adjustments/create/",
+      // Direct stock adjustment (Loss, Theft, Discrepancy). Does not edit the original transaction.
+      stockAdjust: "/api/farms/{farm}/stock-adjust/",
       payments: "/api/farms/{farm}/payments/",
     },
     DEFAULTS: { eggUnitId: 2, eggItemId: null },
@@ -290,7 +292,8 @@
   };
   const normProduction = function (p) {
     return {
-      id: p.id, flock: p.flock, date: p.event_date,
+      // "item" is kept so a stock adjustment on a production row knows which item to move.
+      id: p.id, flock: p.flock, item: idOf(p.item), date: p.event_date,
       collected: n(p.quantity_collected), damaged: n(p.quantity_damaged), saleable: n(p.quantity_saleable),
       notes: p.notes || "",
       // Each quantity now has its own unit (Egg, Tray, Crate). Older records only had a single "unit",
@@ -655,7 +658,9 @@
       }
       return {
         event_date: v.date,
-        party: await supplierIdFor(farmId, v.supplier),
+        // v.party_id is used when editing an existing purchase (the supplier is already known by id).
+        // Otherwise the typed supplier name is looked up or created.
+        party: v.party_id != null && v.party_id !== "" ? toId(v.party_id) : await supplierIdFor(farmId, v.supplier),
         // Whether the goods have arrived yet. The server stores RECEIVED or ORDERED.
         receipt_status: v.receipt_status === "ORDERED" ? "ORDERED" : "RECEIVED",
         amount_paid: money(orZero(v.amount_paid)),
@@ -1019,6 +1024,113 @@
       });
     },
 
+    // Update an existing purchase. The backend reverses the old stock and applies the new one.
+    // v: the same form values createRecord("purchase", ...) takes (plus party_id to keep the supplier by id).
+    updatePurchase: async function (farmId, purchaseId, v) {
+      if (isMock) { await wait(300); return { id: purchaseId }; }
+      const body = await recordBody("purchase", farmId, v);
+      return request("PUT", farmUrl("purchases", farmId) + encodeURIComponent(purchaseId) + "/", body);
+    },
+
+    // Correct ONE field of an existing purchase (used by the Adjust window).
+    // rec      : the purchase row as the UI holds it (state.data.purchase item, shaped by normPurchase)
+    // fieldKey : "quantity" | "unit_price" | "total_amount"
+    // newValue : the corrected number
+    // It rebuilds the full purchase from rec, changes only that field, and calls updatePurchase.
+    updatePurchaseField: async function (farmId, rec, fieldKey, newValue) {
+      const lines = Array.isArray(rec.lines) ? rec.lines : [];
+      if (lines.length > 1) {
+        throw new ApiError(0, null, "This purchase has several lines, so it can't be adjusted here.");
+      }
+      const hasParty = rec.party != null && rec.party !== "";
+      if (!hasParty && !rec.supplier) {
+        throw new ApiError(0, null, "This purchase has no supplier on record, so it can't be adjusted here.");
+      }
+      const line = lines[0] || {};
+      if (line.item == null || line.item === "") {
+        throw new ApiError(0, null, "This purchase has no item on file, so it can't be adjusted here.");
+      }
+      const value = Number(newValue);
+      let quantity = line.quantity != null ? line.quantity : rec.quantity;
+      let price = line.unit_price != null ? line.unit_price : rec.unit_cost;
+      let total;
+
+      if (fieldKey === "quantity") {
+        quantity = value;
+        total = quantity * price;
+      } else if (fieldKey === "unit_price") {
+        price = value;
+        total = quantity * price;
+      } else if (fieldKey === "total_amount") {
+        if (!quantity) {
+          throw new ApiError(0, null, "The quantity is zero, so the total can't be adjusted.");
+        }
+        total = value;
+        price = value / quantity;
+      } else {
+        throw new ApiError(0, null, "That field can't be adjusted on a purchase.");
+      }
+
+      return AgroAPI.updatePurchase(farmId, rec.id, {
+        date: rec.date,
+        party_id: hasParty ? rec.party : undefined,
+        supplier: rec.supplier,
+        receipt_status: String(rec.status || "").toUpperCase() === "ORDERED" ? "ORDERED" : "RECEIVED",
+        amount_paid: rec.amount_paid || 0,
+        payment_method: "CASH",
+        // recordBody reads the purchase notes from "stock_received".
+        stock_received: rec.notes || "",
+        item: line.item,
+        quantity: quantity,
+        unit: line.unit || rec.unit || "",
+        unit_cost: price,
+        total_cost: total
+      });
+    },
+
+    // Update an existing production record. The backend reverses the old stock and applies the new one.
+    // v: the same form values createRecord("production", ...) takes.
+    updateProduction: async function (farmId, productionId, v) {
+      if (isMock) { await wait(300); return { id: productionId }; }
+      const body = await recordBody("production", farmId, v);
+      return request("PUT", farmUrl("production", farmId) + encodeURIComponent(productionId) + "/", body);
+    },
+
+    // Correct ONE field of an existing production record (used by the Adjust window).
+    // rec      : the production row as the UI holds it (state.data.production item, shaped by normProduction)
+    // fieldKey : "quantity_collected" | "quantity_damaged"
+    // newValue : the corrected number
+    updateProductionField: async function (farmId, rec, fieldKey, newValue) {
+      if (rec.item == null || rec.item === "") {
+        throw new ApiError(0, null, "This production record has no item on file, so it can't be adjusted here.");
+      }
+      const value = Number(newValue);
+      let collected = rec.collected;
+      let damaged = rec.damaged;
+
+      if (fieldKey === "quantity_collected") {
+        collected = value;
+      } else if (fieldKey === "quantity_damaged") {
+        damaged = value;
+      } else if (fieldKey === "quantity_saleable") {
+        // The backend works out the saleable quantity itself, so it can't be sent.
+        throw new ApiError(0, null, "The saleable quantity is calculated from collected minus damaged. Adjust the eggs collected or the damaged eggs instead.");
+      } else {
+        throw new ApiError(0, null, "That field can't be adjusted on a production record.");
+      }
+
+      return AgroAPI.updateProduction(farmId, rec.id, {
+        date: rec.date,
+        flock: rec.flock,
+        item: rec.item,
+        collected: collected,
+        unit_collected: rec.unit_collected || "Egg",
+        damaged: damaged,
+        unit_damaged: rec.unit_damaged || rec.unit_collected || "Egg",
+        notes: rec.notes || ""
+      });
+    },
+
     // Loads every page of every record type for a farm.
     loadFarmData: async function (farmId) {
       const r = await Promise.all([
@@ -1043,6 +1155,18 @@
       if (isMock) { await wait(300); return { id: "m" + Date.now().toString(36) }; }
       const body = Object.assign({}, payload, { target_id: toId(payload.target_id) });
       return request("POST", farmUrl("adjustmentsCreate", farmId), body);
+    },
+
+    // Records a direct stock adjustment (Loss, Theft, Discrepancy) without editing the original transaction.
+    // The backend converts the unit and writes the Adjustment log entry itself, in one atomic step,
+    // so the caller must NOT also call createAdjustment.
+    // payload: { target_model, target_id, item_id, quantity, unit, reason, notes, event_date, direction }
+    // direction is "OUT" (stock goes down) or "IN" (stock goes up).
+    recordStockAdjustment: async function (farmId, payload) {
+      if (isMock) { await wait(300); return { id: "m" + Date.now().toString(36) }; }
+      const body = Object.assign({}, payload, { item_id: toId(payload.item_id) });
+      if (body.target_id != null) body.target_id = toId(body.target_id);
+      return request("POST", farmUrl("stockAdjust", farmId), body);
     },
 
     // A later payment against an existing sale, purchase or expense. It never creates a new record:
