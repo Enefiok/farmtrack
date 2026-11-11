@@ -11,7 +11,8 @@
   //   "extra" is optional button HTML shown before the Adjust button (for example "Sell Birds" on a flock).
   // summary (optional): { badge: [text, tone], stats: [[label, value], ...] } is a headline strip at the top.
   // pay (optional): { type, id, payments, outstanding } adds the "Payment history" block and the "Record Payment" button.
-  function openDetailModal(title, sub, rows, lines, trigger, adjust, summary, pay) {
+  // profitHTML (optional): ready-made HTML for the "Profitability" block, shown under the Items table (sales only).
+  function openDetailModal(title, sub, rows, lines, trigger, adjust, summary, pay, profitHTML) {
     modalTrigger = trigger || document.activeElement;
     const hasVal = (v) => v != null && v !== "" && v !== "—";
     // "Created By" and "Created At" become one small line at the bottom instead of two full items.
@@ -50,7 +51,7 @@
           <p class="sub">${esc(sub)}</p>
           ${strip}
           ${items ? `<h3 class="dv-h">Details</h3><dl class="dv-grid">${items}</dl>` : ""}
-          ${linesHTML}${pay ? paymentHistoryHTML(pay.payments) : ""}${adjust ? adjHistoryHTML(adjust.type, adjust.id) : ""}
+          ${linesHTML}${profitHTML || ""}${pay ? paymentHistoryHTML(pay.payments) : ""}${adjust ? adjHistoryHTML(adjust.type, adjust.id) : ""}
           ${footer}
           <div class="actions" style="margin-top:24px">${pay && pay.outstanding > 0 ? payBtn(pay.type, pay.id) : ""}${adjust && adjust.extra ? adjust.extra : ""}${adjust ? adjustBtn(adjust.type, adjust.id) : ""}<button class="btn" type="button" data-close>Close</button></div>
         </div>
@@ -62,6 +63,24 @@
 
   const itemNameOf = (l) => l.item_name || (state.lookups.items.find((i) => String(i.id) === String(l.item)) || {}).name || "";
   const createdRows = (r) => [["Created By", r.created_by || "—"], ["Created At", r.created_at ? fmtWhen(r.created_at) : "—"]];
+
+  // The "Profitability" block in the Sale View window: revenue, cost of goods sold and gross profit.
+  // The backend calculates the cost and the profit (weighted average cost). Both are null when the server
+  // did not send them (for example a sale saved before this feature), and then the whole block is left out.
+  function profitabilityHTML(r) {
+    if (r.total_cost_of_goods == null && r.gross_profit == null) return "";
+    const profit = r.gross_profit;
+    // Green when positive, red when negative, plain when zero or unknown.
+    const color = profit == null ? "" : profit > 0 ? "#147a3a" : profit < 0 ? "#c0392b" : "";
+    const style = color ? ` style="color:${color};font-weight:700"` : ` style="font-weight:700"`;
+    const money = (v) => (v != null ? fmtMoney(v) : "—");
+    return `<h3 class="dv-h">Profitability</h3>
+      <div class="table-wrap mini-lines"><table><tbody>
+        <tr><td>Revenue</td><td class="num">${esc(fmtMoney(r.total))}</td></tr>
+        <tr><td>Cost of Goods (COGS)</td><td class="num">${esc(money(r.total_cost_of_goods))}</td></tr>
+        <tr><td><b>Gross Profit</b></td><td class="num"${style}>${esc(money(profit))}</td></tr>
+      </tbody></table></div>`;
+  }
 
   function openViewFlockModal(flockId, trigger) {
     const f = state.data.flock.find((x) => String(x.id) === String(flockId));
@@ -175,7 +194,7 @@
         ["Amount paid", fmtMoney(r.amount_paid || 0), "check", "green"],
         ["Outstanding", fmtMoney(r.outstanding_balance || 0), "alert", owedTone(r.outstanding_balance)],
       ],
-    }, { type: "sales", id: r.id, payments: r.payments || [], outstanding: num(r.outstanding_balance) });
+    }, { type: "sales", id: r.id, payments: r.payments || [], outstanding: num(r.outstanding_balance) }, profitabilityHTML(r));
   }
 
   function openViewExpenseModal(id, trigger) {
@@ -195,4 +214,3 @@
       ],
     }, { type: "expense", id: r.id, payments: r.payments || [], outstanding: num(r.outstanding_balance) });
   }
-

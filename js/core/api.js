@@ -384,6 +384,9 @@
       discount_type: String(x.discount_type || "FIXED").toUpperCase(),
       discount_value: n(x.discount_value),
       total: total,
+      // Calculated by the backend from the weighted average cost. null when the server does not send them.
+      total_cost_of_goods: x.total_cost_of_goods != null ? n(x.total_cost_of_goods) : null,
+      gross_profit: x.gross_profit != null ? n(x.gross_profit) : null,
       amount_paid: pay.amount_paid,
       outstanding_balance: pay.outstanding_balance,
       payments: paymentsOf(x),
@@ -473,6 +476,9 @@
       is_stock_tracked: !!i.is_stock_tracked,
       // The stock on hand as sent by the server (null when the server does not send it).
       current_stock: i.current_stock != null ? n(i.current_stock) : null,
+      // Valuation calculated by the backend (weighted average cost). null when the server does not send them.
+      current_average_cost: i.current_average_cost != null ? n(i.current_average_cost) : null,
+      total_stock_value: i.total_stock_value != null ? n(i.total_stock_value) : null,
       // false once the item has been archived (soft-deleted) on the server
       is_active: i.is_active !== false,
       // When the item last changed. Falls back to the created time; empty when the server sends neither.
@@ -485,6 +491,16 @@
       unit_name: c.unit_name || c.unit_display || nameOf(c.unit) || "",
       factor: n(c.factor), is_base_unit: !!c.is_base_unit
     };
+  };
+
+  // One stock movement (a row of the stock ledger). The raw server fields (event_date, source_type,
+  // direction, quantity, notes ...) are kept as they are, so the History window keeps working.
+  // The money fields become numbers, or null when the server does not send them.
+  const normStockMovement = function (m) {
+    return Object.assign({}, m, {
+      unit_cost: m.unit_cost != null ? n(m.unit_cost) : null,
+      total_value: m.total_value != null ? n(m.total_value) : null
+    });
   };
 
   // The server wants the id of a party (customer or supplier), but the form lets the user type a name.
@@ -908,7 +924,7 @@
     },
     // Stock movements for one item (the stock ledger shown in the History window).
     listStockMovements: async function (farmId, itemId) {
-      return listAll(farmUrl("items", farmId) + encodeURIComponent(itemId) + "/movements/");
+      return (await listAll(farmUrl("items", farmId) + encodeURIComponent(itemId) + "/movements/")).map(normStockMovement);
     },
     // v: { unit, factor, is_base_unit }
     createConversion: function (farmId, itemId, v) {

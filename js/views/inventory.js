@@ -82,6 +82,10 @@
   };
   const STOCK_FILTERS = [["", "All stock"], ["in", "In stock"], ["out", "Out of stock"], ["untracked", "Not tracked"]];
 
+  // Money figure for the Avg Cost and Total Value columns. Only tracked items have a valuation, and the
+  // server may not send one yet (null), so show a dash then. A real zero is shown as a zero amount.
+  const invMoney = (i, v) => (i.is_stock_tracked && v != null ? fmtMoney(v) : "—");
+
   // Items after the search box, the category select and the stock filter are all applied.
   function inventoryShown() {
     const q = state.query.trim().toLowerCase();
@@ -97,10 +101,12 @@
   function exportInventory() {
     const rows = inventoryShown();
     if (!rows.length) { toast("There are no items to export."); return; }
+    const csvMoney = (i, v) => (i.is_stock_tracked && v != null ? Number(v).toFixed(2) : "");
     downloadCSV("inventory", [
-      ["Name", "Category", "Base unit", "Stock tracked", "Current stock", "Last updated"],
+      ["Name", "Category", "Base unit", "Stock tracked", "Current stock", "Average cost", "Total value", "Last updated"],
       ...rows.map((i) => [i.name, categoryLabel(i.category), invUnitName(i), i.is_stock_tracked ? "Yes" : "No",
-        i.is_stock_tracked && i.current_stock != null ? fmtQty(i.current_stock) : "", fmtStamp(i.updated_at)]),
+        i.is_stock_tracked && i.current_stock != null ? fmtQty(i.current_stock) : "",
+        csvMoney(i, i.current_average_cost), csvMoney(i, i.total_stock_value), fmtStamp(i.updated_at)]),
     ]);
   }
 
@@ -129,7 +135,7 @@
     // </section>`;
 
 
-    
+
      const shown = inventoryShown();
     const menuItem = (action, id, ic, label, cls) => `<button type="button" role="menuitem"${cls ? ` class="${cls}"` : ""} data-action="${action}" data-id="${esc(id)}">${icon(ic, 15)}${label}</button>`;
     const rows = shown.map((i) => {
@@ -139,6 +145,8 @@
       return `<tr>
       <td class="item-name">${esc(i.name)}</td><td><span class="cat-chip cat-${esc(String(i.category).toLowerCase())}">${esc(categoryLabel(i.category))}</span></td><td>${esc(invUnitName(i))}</td><td><span class="stock-pill ${i.is_stock_tracked ? "on" : "off"}">${i.is_stock_tracked ? "Yes" : "No"}</span></td>
       <td class="num">${esc(stockVal)}</td>
+      <td class="num">${esc(invMoney(i, i.current_average_cost))}</td>
+      <td class="num">${esc(invMoney(i, i.total_stock_value))}</td>
       <td>${esc(fmtStamp(i.updated_at))}</td>
       <td class="num"><div class="menu-wrap" style="display:inline-block"><button class="icon-btn square row-btn" type="button" data-menu="${mid}" data-fixed aria-haspopup="true" aria-label="Actions for ${esc(i.name)}">${icon("more", 16)}</button>
         <div class="menu tbl-menu" id="${mid}" role="menu" hidden>${menuItem("edit-item", i.id, "edit", "Edit")}${menuItem("manage-conversions", i.id, "convert", "Conversions")}${menuItem("stock-history", i.id, "history", "History")}${menuItem("archive-item", i.id, "archive", "Archive", "danger")}</div></div></td></tr>`;
@@ -154,7 +162,7 @@
     const empty = state.query.trim() ? `No items match "${esc(state.query)}".` : "No items match these filters.";
     return head + inventoryStats(inv.items) + `<section class="card table-card inv-table">
       <div class="table-head"><div><h3>Inventory items</h3><p class="sub-line">Showing the latest records for ${esc((farm() || {}).name || "your farm")}</p></div>${tools}</div>
-      ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Base unit</th><th>Stock tracked</th><th class="num">Current Stock</th><th>Last updated</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">${empty}</div>`}
+      ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Base unit</th><th>Stock tracked</th><th class="num">Current Stock</th><th class="num">Avg Cost</th><th class="num">Total Value</th><th>Last updated</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">${empty}</div>`}
     </section>`;
   }
 
@@ -498,9 +506,11 @@
         listEl.innerHTML = `<p class="empty-line" style="padding:8px 0 0">No stock movements recorded yet. Record a purchase or production to see history here.</p>`;
         return;
       }
-      listEl.innerHTML = `<div class="table-wrap mini-lines"><table><thead><tr><th>Date</th><th>Source</th><th>Direction</th><th class="num">Quantity</th><th>Notes</th></tr></thead><tbody>${movements.map((m) => {
+      // Unit cost and total value come from the backend (null when it does not send them, shown as a dash).
+      const cost = (v) => (v != null ? fmtMoney(v) : "—");
+      listEl.innerHTML = `<div class="table-wrap mini-lines"><table><thead><tr><th>Date</th><th>Source</th><th>Direction</th><th class="num">Quantity</th><th class="num">Unit Cost</th><th class="num">Total Value</th><th>Notes</th></tr></thead><tbody>${movements.map((m) => {
         const inbound = String(m.direction || "").toUpperCase() === "IN";
-        return `<tr><td>${esc(fmtDate(String(m.event_date || "").slice(0, 10)))}</td><td>${esc(m.source_type || "—")}</td><td><b style="color:${inbound ? "#147a3a" : "#c0392b"}">${esc(m.direction || "—")}</b></td><td class="num">${esc(fmtQty(num(m.quantity)))}</td><td>${esc(m.notes || "—")}</td></tr>`;
+        return `<tr><td>${esc(fmtDate(String(m.event_date || "").slice(0, 10)))}</td><td>${esc(m.source_type || "—")}</td><td><b style="color:${inbound ? "#147a3a" : "#c0392b"}">${esc(m.direction || "—")}</b></td><td class="num">${esc(fmtQty(num(m.quantity)))}</td><td class="num">${esc(cost(m.unit_cost))}</td><td class="num">${esc(cost(m.total_value))}</td><td>${esc(m.notes || "—")}</td></tr>`;
       }).join("")}</tbody></table></div>`;
     } catch (err) {
       const listEl = $("#history-list");
