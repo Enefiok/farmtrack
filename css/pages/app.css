@@ -164,8 +164,8 @@
     .stat.warn .val { color: var(--error); }
 
     .dash-grid {
-      display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start;
-      grid-template-areas: "chart perf" "recent perf";
+      display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: stretch;
+      grid-template-areas: "chart perf" "recent recent";
     }
     .area-chart { grid-area: chart; }
     .area-perf { grid-area: perf; }
@@ -429,3 +429,44 @@
 .qty-row input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 .qty-row input[type="number"]::-webkit-outer-spin-button,
 .qty-row input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+
+    /* ---------- Pager ("1–5 of 12   Previous  Next") ---------- */
+    .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 4px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+    .pager-btns { display: flex; gap: 8px; }
+    .pager .tool-btn { height: 32px; padding: 0 14px; font-size: 12px; }
+    .tool-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .tool-btn:disabled:hover { background: var(--card); }
+
+        /* ---------- Production page: header, summary cards, filter panel ---------- */
+    .rep-head { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+    .rep-ic { width: 48px; height: 48px; flex: none; display: grid; place-items: center; border-radius: 12px; background: var(--tile); color: var(--green); }
+    .rep-kicker { margin: 0 0 4px; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--green); }
+    .rep-head h1 { margin: 0; font-size: 28px; font-weight: 400; }
+    .rep-sub { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+
+    .pstat { padding: 18px 20px; }
+    .plbl { font-size: 12px; color: var(--muted); }
+    .pval { margin: 14px 0 12px; font-size: 28px; font-weight: 600; line-height: 1.1; }
+    .pbadge { --c: var(--green); display: inline-block; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; color: var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); }
+    .pbadge.warn { --c: #c2570c; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pbadge.warn { --c: #f0a060; } }
+
+    .filter-card { margin-bottom: 16px; padding: 16px 20px; }
+    .filter-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) repeat(var(--n, 2), minmax(0, 1fr)) auto; gap: 16px; align-items: end; }
+    .filter-grid .field label { font-size: 11px; color: var(--muted); }
+    .date-pair { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; }
+    .date-pair .to { font-size: 12px; color: var(--muted); }
+    .filter-actions { display: flex; align-items: center; gap: 12px; height: 44px; }
+    .filter-actions .btn { height: 44px; border-radius: 12px; }
+    .btn.ghost.is-on { border-color: var(--green); color: var(--green); background: var(--green-tint); }
+    @media (max-width: 1100px) { .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .filter-actions { grid-column: 1 / -1; } }
+    @media (max-width: 640px) { .filter-grid { grid-template-columns: 1fr; } .date-pair { grid-template-columns: 1fr; } .date-pair .to { display: none; } }
+
+    /* The pager inside a table card needs side padding, because the card itself has none. */
+    .table-card .pager { margin: 0; padding: 14px 20px; }
+
+    /* Dashboard period dropdown (calendar icon on the left, chevron on the right) */
+    .period-sel { margin-top: 14px; display: inline-block; }
+    .period-sel select { padding-left: 36px; }
+    .period-sel > svg.i:first-child { left: 12px; right: auto; color: var(--muted); }

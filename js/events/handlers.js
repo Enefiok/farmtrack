@@ -90,7 +90,21 @@
       case "export-records": exportRecords(act.dataset.type); break;
       case "export-dashboard": exportDashboard(); break;
       case "review-flock": location.hash = "#/records/flock"; break;
-      case "view-all": location.hash = "#/records/" + (hasEggs() ? "production" : "flock"); break;
+      case "act-prev": state.actPage = Math.max(0, (state.actPage || 0) - 1); renderView(); break;
+      case "act-next": state.actPage = (state.actPage || 0) + 1; renderView(); break;
+      case "filter-records": state.recFilterOpen = !state.recFilterOpen; renderView(); break;
+          case "apply-rec-filters": {
+        const f = {};
+        $$("[data-pf]").forEach((el) => { f[el.dataset.pf] = el.value; });
+        if (f.from && f.to && f.from > f.to) { toast("The start date can't be after the end date."); break; }
+        state.recFilters = { ...(state.recFilters || {}), [act.dataset.type]: f };
+        state.recPage = 0; renderView(); break;
+      }
+      case "clear-rec-filters":
+        state.recFilters = { ...(state.recFilters || {}), [act.dataset.type]: {} };
+        state.recPage = 0; renderView(); break;
+      case "rec-prev": state.recPage = Math.max(0, (state.recPage || 0) - 1); renderView(); break;
+      case "rec-next": state.recPage = (state.recPage || 0) + 1; renderView(); break;
       case "switch-farm":
         closeMenus();
         if (act.dataset.id !== state.farmId) { state.farmId = act.dataset.id; boot(); }
@@ -117,10 +131,12 @@
       bindChart();
     }
         if (e.target.id === "inv-category") { state.invCategory = e.target.value; renderView(); }
+        if (e.target.id === "dash-period") { state.dashPeriod = e.target.value; state.actPage = 0; renderView(); }
   });
 
   document.addEventListener("input", (e) => {
     if (e.target.id === "search") {
+      state.recPage = 0;
       state.query = e.target.value;
       if ((route().page === "records" || route().page === "inventory") && state.status === "ready") renderView();
     }
@@ -155,6 +171,7 @@
 
   window.addEventListener("hashchange", () => {
     state.query = ""; const s = $("#search"); if (s) s.value = "";
+    state.recPage = 0;
     renderView(); window.scrollTo(0, 0);
     // Opening a Records tab pulls fresh rows for that tab from the server
     const { page, sub } = route();
@@ -166,4 +183,5 @@
         .then(() => { if (route().page === "records" && state.status === "ready") renderView(); })
         .catch(() => { /* keep showing what we already have */ });
     }
+
   });

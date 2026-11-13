@@ -10,22 +10,65 @@
   const sumBy = (arr, field, pred = () => true) => arr.filter(pred).reduce((s, r) => s + num(r[field]), 0);
   const pct = (cur, prev) => (prev > 0 ? ((cur - prev) / prev) * 100 : null);
 
+  // [key, label shown in the dropdown, short text used inside card titles]
+  const DASH_PERIODS = [["today", "Today", "today"], ["7d", "Last 7 days", "last 7 days"], ["30d", "Last 30 days", "last 30 days"], ["month", "This month", "this month"], ["lastmonth", "Last month", "last month"], ["year", "This year", "this year"], ["all", "All time", "all time"]];
+  const dashPeriod = () => DASH_PERIODS.find((p) => p[0] === state.dashPeriod) || DASH_PERIODS[1];
+
+  // The chosen period as ISO dates, plus the period it is compared with (for the +/- % on the cards).
+  // "all" has no dates and no comparison.
+  function periodRange(key) {
+    const now = new Date(), y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+    const today = new Date(y, m, d);
+    let from = today, to = today, pf, pt;
+    if (key === "all") return { from: "", to: "", prevFrom: "", prevTo: "", days: 0 };
+    if (key === "month") { from = new Date(y, m, 1); pf = new Date(y, m - 1, 1); pt = new Date(y, m - 1, Math.min(d, new Date(y, m, 0).getDate())); }
+    else if (key === "lastmonth") { from = new Date(y, m - 1, 1); to = new Date(y, m, 0); pf = new Date(y, m - 2, 1); pt = new Date(y, m - 1, 0); }
+    else if (key === "year") { from = new Date(y, 0, 1); pf = new Date(y - 1, 0, 1); pt = new Date(y - 1, m, d); }
+    else {
+      if (key === "7d") from = new Date(y, m, d - 6);
+      else if (key === "30d") from = new Date(y, m, d - 29);
+      const len = Math.round((to - from) / 86400000) + 1; // days in the period
+      pt = new Date(from.getFullYear(), from.getMonth(), from.getDate() - 1);
+      pf = new Date(pt.getFullYear(), pt.getMonth(), pt.getDate() - (len - 1));
+    }
+    return { from: localISO(from), to: localISO(to), prevFrom: localISO(pf), prevTo: localISO(pt), days: Math.round((to - from) / 86400000) + 1 };
+  }
+
+  // True when an activity (or any row with an "at" timestamp) falls inside the chosen period.
+  function inDashPeriod(a) {
+    const p = periodRange(dashPeriod()[0]);
+    if (!p.from) return true;
+    const dt = new Date(a.at);
+    if (isNaN(dt)) return true;
+    const day = localISO(dt);
+    return day >= p.from && day <= p.to;
+  }
+
   function metrics() {
     const d = state.data, now = new Date();
-    const today = localISO(now);
-    const y = new Date(now); y.setDate(now.getDate() - 1);
-    const ym = today.slice(0, 7);
+    const p = periodRange(dashPeriod()[0]);
+    const ym = localISO(now).slice(0, 7);
     const pm = localISO(new Date(now.getFullYear(), now.getMonth() - 1, 1)).slice(0, 7);
-    const inMonth = (m) => (r) => (r.date || "").startsWith(m);
+    const inMonth = (mm) => (r) => (r.date || "").startsWith(mm);
+    const within = (a, b) => (r) => { const x = r.date || ""; return (!a || x >= a) && (!b || x <= b); };
     const live = sumBy(d.flock, "current_count", (f) => f.status === "Active");
-    const eggsToday = sumBy(d.production, "collected", (p) => p.date === today);
-    const eggsYest = sumBy(d.production, "collected", (p) => p.date === localISO(y));
+    // Eggs and sales follow the dropdown. "From" the previous period gives the +/- % (none for "all time").
+    const eggs = sumBy(d.production, "collected", within(p.from, p.to));
+    const eggsPrev = p.from ? sumBy(d.production, "collected", within(p.prevFrom, p.prevTo)) : 0;
+    const sell = sumBy(d.sales, "total", within(p.from, p.to));
+    const sellPrev = p.from ? sumBy(d.sales, "total", within(p.prevFrom, p.prevTo)) : 0;
+    // Stock Value is a running total, so it does not depend on the period.
     const buyAll = sumBy(d.purchase, "total_cost");
     const buyM = sumBy(d.purchase, "total_cost", inMonth(ym)), buyP = sumBy(d.purchase, "total_cost", inMonth(pm));
-    const sellM = sumBy(d.sales, "total", inMonth(ym)), sellP = sumBy(d.sales, "total", inMonth(pm));
-    const target = state.settings.dailyEggTarget || live;
-    return { live, eggsToday, target, buyAll, sellM,
-      eggsDelta: pct(eggsToday, eggsYest), buyDelta: pct(buyM, buyP), sellDelta: pct(sellM, sellP) };
+    // The laying target is per day, so it grows with the number of days in the period.
+    let days = p.days;
+    if (!days) {
+      const first = d.production.map((r) => r.date).filter(Boolean).sort()[0];
+      days = first ? Math.max(1, Math.round((new Date(localISO(now)) - new Date(first)) / 86400000) + 1) : 1;
+    }
+    const target = (state.settings.dailyEggTarget || live) * days;
+    return { live, eggsToday: eggs, target, buyAll, sellM: sell, days,
+      eggsDelta: pct(eggs, eggsPrev), buyDelta: pct(buyM, buyP), sellDelta: pct(sell, sellPrev) };
   }
 
   function monthly() {
