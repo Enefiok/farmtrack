@@ -470,3 +470,93 @@
     .period-sel { margin-top: 14px; display: inline-block; }
     .period-sel select { padding-left: 36px; }
     .period-sel > svg.i:first-child { left: 12px; right: auto; color: var(--muted); }
+
+
+
+    /* ---------- Records page: report layout (append to the bottom of css/pages/app.css) ---------- */
+.rep-root .card { box-shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 2px 8px rgba(0, 0, 0, .03); }
+.rep-root.is-busy .rep-cards,
+.rep-root.is-busy .rep-chart-card { opacity: .6; transition: opacity .15s; }
+
+/* A. Page header */
+.rep-head { display: flex; align-items: center; gap: 16px; margin: 0 0 20px; }
+.rep-head-ic { width: 48px; height: 48px; flex: none; display: grid; place-items: center; border-radius: 12px; background: var(--tile, var(--green-tint)); color: var(--green); }
+.rep-eyebrow { margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--green); }
+.rep-head h1 { margin: 0 0 4px; font-size: 24px; font-weight: 500; }
+.rep-sub { margin: 0; font-size: 13px; color: var(--muted); }
+
+/* B. Filter bar */
+.rep-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; margin-bottom: 16px; }
+.rep-field { display: flex; flex-direction: column; gap: 6px; min-width: 160px; }
+.rep-field.grow { flex: 1 1 220px; }
+.rep-field label { font-size: 12px; font-weight: 500; color: var(--label); }
+.rep-custom { display: flex; gap: 12px; }
+.rep-input, .rep-sel select {
+  width: 100%; height: 40px; padding: 0 12px; font: inherit; font-size: 13px; color: var(--text);
+  background: var(--field); border: 1px solid var(--line); border-radius: 10px; outline: 0;
+  transition: border-color .15s, box-shadow .15s;
+}
+.rep-input:focus, .rep-sel select:focus { border-color: var(--green); box-shadow: 0 0 0 3px var(--ring); }
+.rep-sel { position: relative; }
+.rep-sel select { appearance: none; -webkit-appearance: none; padding-right: 36px; cursor: pointer; }
+.rep-sel > svg.i { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--muted); }
+.rep-search { position: relative; }
+.rep-search > svg.i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--muted); }
+.rep-search .rep-input { padding-left: 36px; }
+.rep-actions { display: flex; gap: 10px; margin-left: auto; }
+.rep-actions .btn { height: 40px; }
+
+/* C. Summary cards */
+.rep-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+.rep-card { display: flex; flex-direction: column; padding: 16px 18px; }
+.rep-card-lbl { font-size: 12px; color: var(--muted); }
+.rep-card-val { margin: 10px 0 4px; font-size: 26px; font-weight: 700; line-height: 1.15; }
+.rep-card-note { font-size: 11px; color: var(--muted); }
+.rep-card-foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 10px; font-size: 11px; color: var(--muted); }
+.rep-badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 500; white-space: nowrap; }
+.rep-badge.good { color: var(--green); background: var(--green-soft); }
+.rep-badge.bad { color: var(--error); background: color-mix(in srgb, var(--error) 14%, transparent); }
+.rep-badge.flat { color: var(--muted); background: var(--field); }
+
+/* D. Chart */
+.rep-chart-card { margin-bottom: 16px; }
+.rep-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.rep-card-head h3 { margin: 0 0 4px; font-size: 16px; font-weight: 500; }
+.rep-card-sub { margin: 0; font-size: 12px; color: var(--muted); }
+.rep-seg { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--field); }
+.rep-seg button { border: 0; background: none; padding: 6px 12px; border-radius: 8px; font-size: 12px; color: var(--muted); }
+.rep-seg button[aria-pressed="true"] { background: var(--card); color: var(--green); font-weight: 500; box-shadow: 0 1px 2px rgba(0, 0, 0, .1); }
+.rep-chart-wrap { position: relative; height: 320px; }
+.rep-msg { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 200px; text-align: center; font-size: 13px; color: var(--muted); }
+.rep-msg .spinner { margin: 0; }
+
+/* E. Table */
+.rep-table.table-card th { background: var(--field); color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--line); }
+.rep-table tbody tr { transition: background .12s; }
+.rep-table tbody tr:hover { background: var(--green-tint); }
+.rep-table .table-head h3 { font-size: 16px; font-weight: 500; }
+.rep-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.rep-pager { display: flex; gap: 8px; }
+.rep-pager button { height: 32px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font-size: 12px; }
+.rep-pager button:hover:not(:disabled) { background: var(--green-tint); }
+.rep-pager button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* Loading placeholders */
+.rep-skel { display: block; border-radius: 6px; background: linear-gradient(90deg, var(--field), var(--line), var(--field)); background-size: 200% 100%; animation: rep-shimmer 1.2s linear infinite; }
+@keyframes rep-shimmer { to { background-position: -200% 0; } }
+
+/* Responsive: cards stack */
+@media (max-width: 1100px) {
+  .rep-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .rep-cards { grid-template-columns: minmax(0, 1fr); }
+  .rep-head h1 { font-size: 20px; }
+  .rep-field, .rep-custom { min-width: 0; flex: 1 1 100%; }
+  .rep-custom .rep-field { flex: 1 1 0; }
+  .rep-actions { width: 100%; margin-left: 0; }
+  .rep-actions .btn { flex: 1; }
+  .rep-chart-wrap { height: 260px; }
+  .rep-seg { width: 100%; }
+  .rep-seg button { flex: 1; }
+}

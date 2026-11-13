@@ -38,6 +38,8 @@
       // Direct stock adjustment (Loss, Theft, Discrepancy). Does not edit the original transaction.
       stockAdjust: "/api/farms/{farm}/stock-adjust/",
       payments: "/api/farms/{farm}/payments/",
+      // Financial, operations and alert summary for the Dashboard. Takes ?days=30 (or 7, 90 ...).
+      dashboard: "/api/farms/{farm}/dashboard/",
     },
     DEFAULTS: { eggUnitId: 2, eggItemId: null },
   };
@@ -502,6 +504,106 @@
       total_value: m.total_value != null ? n(m.total_value) : null
     });
   };
+
+  // The dashboard summary from the server. Decimals may arrive as strings ("150.00"), so every number is
+  // parsed here and the Dashboard can use the values directly. Field names are kept as the server sends them
+  // (for example "party__name" on a recent sale). A missing section becomes an empty one.
+  const normDashboard = function (d) {
+    d = d || {};
+    const nums = function (o) {
+      const out = {};
+      Object.keys(o || {}).forEach(function (k) { out[k] = n(o[k]); });
+      return out;
+    };
+    const ra = d.recent_activity || {};
+    const al = d.alerts || {};
+    return {
+      financial: nums(d.financial),
+      cash_flow: nums(d.cash_flow),
+      operations: nums(d.operations),
+      recent_activity: {
+        recent_sales: (Array.isArray(ra.recent_sales) ? ra.recent_sales : []).map(function (x) {
+          return Object.assign({}, x, {
+            total_amount: n(x.total_amount),
+            // null when the server does not send a profit for this sale
+            gross_profit: x.gross_profit != null ? n(x.gross_profit) : null
+          });
+        }),
+        recent_expenses: (Array.isArray(ra.recent_expenses) ? ra.recent_expenses : []).map(function (x) {
+          return Object.assign({}, x, { amount: n(x.amount) });
+        })
+      },
+      alerts: {
+        low_stock_items: (Array.isArray(al.low_stock_items) ? al.low_stock_items : []).map(function (x) {
+          return Object.assign({}, x, { current_stock: n(x.current_stock) });
+        })
+      },
+      period: d.period || {}
+    };
+  };
+
+  // ---------- Records page: stats, trend and breakdown ----------
+  // Each Records tab -> its base endpoint plus the sub-paths the backend exposes.
+  // "stats" feeds the summary cards (values + a "trends" object), "trend" feeds the main chart,
+  // "breakdown" feeds the donut chart. null means that tab has no such endpoint.
+  // breakdownDated: false means the breakdown is a snapshot, so no date range is sent with it.
+  // If a path is wrong for your backend, fix it here (one line per tab).
+  const REPORT_ENDPOINTS = {
+    production: { base: "production", stats: "stats/", trend: "trend/", breakdown: null },
+    sales:      { base: "sales",      stats: "stats/", trend: "trend/", breakdown: "by-customer/", breakdownDated: true },
+    purchase:   { base: "purchases",  stats: "stats/", trend: "trend/", breakdown: null },
+    expense:    { base: "expenses",   stats: "stats/", trend: "trend/", breakdown: "by-category/", breakdownDated: true },
+    flock:      { base: "flocks",     stats: "stats/", trend: null,     breakdown: "by-stage/",    breakdownDated: false },
+    activity:   { base: "activities", stats: "stats/", trend: "trend/", breakdown: "by-type/",     breakdownDated: true },
+    inventory:  { base: "items",      stats: "stats/", trend: "trend/", breakdown: "by-category/", breakdownDated: true }
+  };
+
+  // Keys whose values are text labels, so a numeric-looking string there is NOT turned into a number.
+  const LABEL_KEYS = ["date", "day", "label", "name", "customer", "category", "stage", "type", "party", "party_name", "period", "unit"];
+
+  // Decimals arrive as strings ("150.00"); the charts and cards need numbers. Works on any nested shape.
+  function numDeep(v, key) {
+    if (Array.isArray(v)) return v.map(function (x) { return numDeep(x); });
+    if (v && typeof v === "object") {
+      const o = {};
+      Object.keys(v).forEach(function (k) { o[k] = numDeep(v[k], k); });
+      return o;
+    }
+    if (typeof v === "string" && LABEL_KEYS.indexOf(key) === -1 && /^-?\d+(\.\d+)?$/.test(v.trim())) return parseFloat(v);
+    return v;
+  }
+
+  // A trend or breakdown response may be a bare array or wrapped in an object.
+  function unwrapList(d) {
+    if (Array.isArray(d)) return d;
+    if (!d || typeof d !== "object") return [];
+    const inner = d.results || d.data || d.trend || d.series || d.items || d.breakdown;
+    return Array.isArray(inner) ? inner : [];
+  }
+
+  // Local YYYY-MM-DD (toISOString would shift the day for users ahead of or behind UTC).
+  const ymd = function (d) {
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  };
+
+  // range is { days: 30 } or { start_date: "2026-01-01", end_date: "2026-11-13" }.
+  function reportQuery(range) {
+    range = range || {};
+    if (range.start_date && range.end_date) {
+      return "?start_date=" + encodeURIComponent(range.start_date) + "&end_date=" + encodeURIComponent(range.end_date);
+    }
+    return "?days=" + Math.max(1, parseInt(range.days, 10) || 30);
+  }
+
+  // Turns the date-range dropdown value into a range object.
+  // preset: "7d" | "30d" | "90d" | "year". For "custom" the view builds { start_date, end_date } itself.
+  function presetRange(preset) {
+    if (preset === "year") {
+      const now = new Date();
+      return { start_date: ymd(new Date(now.getFullYear(), 0, 1)), end_date: ymd(now) };
+    }
+    return { days: ({ "7d": 7, "30d": 30, "90d": 90 })[preset] || 30 };
+  }
 
   // The server wants the id of a party (customer or supplier), but the form lets the user type a name.
   // Find the party with that name, or create it if it is new.
@@ -1146,6 +1248,61 @@
         notes: rec.notes || ""
       });
     },
+
+    // Dashboard summary: financial totals, cash flow, operations, recent sales and expenses, low stock alerts.
+    // days: how many days back to look (default 30). The numbers come back already parsed (see normDashboard).
+    getDashboardStats: async function (farmId, days) {
+      const d = Math.max(1, parseInt(days, 10) || 30);
+      if (isMock) { await wait(300); return normDashboard({ period: { days: d } }); }
+      return normDashboard(await request("GET", farmUrl("dashboard", farmId) + "?days=" + d));
+    },
+
+    // ---------- Records page: summary cards, trend chart and breakdown chart ----------
+    // Turns the date-range dropdown value ("7d", "30d", "90d", "year") into { days } or { start_date, end_date }.
+    // For a custom range the view passes { start_date, end_date } (YYYY-MM-DD) straight in.
+    dateRange: presetRange,
+
+    // One call for a whole tab. The three requests run in parallel and fail independently, so a tab whose
+    // backend endpoint is missing still shows its other parts. Returns:
+    //   stats     : the stats object with numbers parsed (includes the backend's "trends" object), or null
+    //   trend     : array of points for the main chart ([] when none)
+    //   breakdown : array of slices for the donut / bar chart ([] when none)
+    //   errors    : { stats?, trend?, breakdown? } with the ApiError of any request that failed
+    // type: "production" | "sales" | "purchase" | "expense" | "flock" | "activity" | "inventory"
+    // range: { days } or { start_date, end_date }  (see AgroAPI.dateRange)
+    getRecordsReport: async function (farmId, type, range) {
+      const ep = REPORT_ENDPOINTS[type];
+      if (!ep) throw new Error("No report endpoints for record type: " + type);
+      if (isMock) { await wait(300); return { stats: null, trend: [], breakdown: [], errors: {} }; }
+
+      const base = farmUrl(ep.base, farmId);
+      const q = reportQuery(range);
+      const get = function (suffix, dated) {
+        return suffix ? request("GET", base + suffix + (dated ? q : "")) : Promise.resolve(null);
+      };
+      const r = await Promise.allSettled([
+        get(ep.stats, true),
+        get(ep.trend, true),
+        get(ep.breakdown, ep.breakdownDated !== false)
+      ]);
+
+      const out = { stats: null, trend: [], breakdown: [], errors: {} };
+      if (r[0].status === "fulfilled" && r[0].value) {
+        const s = numDeep(r[0].value);
+        s.trends = s.trends && typeof s.trends === "object" ? s.trends : {};
+        out.stats = s;
+      } else if (r[0].status === "rejected") out.errors.stats = r[0].reason;
+      if (r[1].status === "fulfilled") out.trend = numDeep(unwrapList(r[1].value));
+      else out.errors.trend = r[1].reason;
+      if (r[2].status === "fulfilled") out.breakdown = numDeep(unwrapList(r[2].value));
+      else out.errors.breakdown = r[2].reason;
+      return out;
+    },
+
+    // Single-purpose versions, for when only one part needs refreshing.
+    getRecordStats: async function (farmId, type, range) { return (await AgroAPI.getRecordsReport(farmId, type, range)).stats; },
+    getRecordTrend: async function (farmId, type, range) { return (await AgroAPI.getRecordsReport(farmId, type, range)).trend; },
+    getRecordBreakdown: async function (farmId, type, range) { return (await AgroAPI.getRecordsReport(farmId, type, range)).breakdown; },
 
     // Loads every page of every record type for a farm.
     loadFarmData: async function (farmId) {
