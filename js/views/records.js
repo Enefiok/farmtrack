@@ -32,6 +32,12 @@
        ownsTable        : true when the page draws its own table (Inventory)
        cards            : [{ label, summaryKey, trendKey?, format, inverse?, warn?, caption?, note?(summary) }]
        dynamicCards     : optional (summary) => [{ label, value, format }] appended after cards
+                          (only while no type is picked in typeFilter)
+       typeFilter       : optional { label, all, options: [[value, label], ...] }. A BACKEND dropdown (Farm Activities):
+                          the value is sent as activity_type to stats + trend and the table is narrowed to it.
+       cardsByType      : optional { [type value]: [cards] } used instead of cards/dynamicCards while that type is picked.
+                          A type with no entry falls back to cards.
+       minCols          : optional minimum card-grid columns, so a short card set does not stretch across the row
        chartPrimary     : { views: [ view, ... ] }   EXACTLY ONE chart card per tab.
                           With 2+ views a .rep-seg toggle swaps the view inside that same card;
                           with 1 view the toggle is hidden.
@@ -45,6 +51,7 @@
        guard  : "series"    -> needs >= 3 points and at least one non-zero value
                 "breakdown" -> needs more than one non-zero slice
                 null        -> no guard
+       allOnly: true -> the view only makes sense for the unfiltered tab; with a typeFilter value picked it shows a note
      ===================================================================== */
   // Turn a tab on by adding its key here. Delete this array (and the includes() check in
   // recordsView) once every tab has been tested.
@@ -55,6 +62,9 @@
     const t = String(l == null ? "" : l);
     return t.length > 1 && /^[A-Z0-9_]+$/.test(t) ? t.charAt(0) + t.slice(1).toLowerCase().replace(/_/g, " ") : t;
   };
+
+  // One summary card of a single activity type (Farm Activities). summaryKey is the backend's key for that type.
+  const ACT_CARD = (label, summaryKey, format) => ({ label, summaryKey, format, caption: "In the selected period" });
 
   const TAB_REPORT_CONFIG = {
     production: {
@@ -173,19 +183,36 @@
       dateRangeAffects: "cards+chart",
       filter: { field: "flock", label: "Flock", all: "All flocks", kind: "flock" },
       sigKeys: [],   // the row count is always part of the signature, and that is the number that matters here
+      // "Activity type" dropdown. Values are the backend's activity_type codes (they match each row's `code`).
+      typeFilter: {
+        label: "Activity type", all: "All activities",
+        options: [["FEED_CONSUMPTION", "Feed consumption"], ["MORTALITY", "Mortality"], ["MEDICATION", "Medication"],
+                  ["VACCINATION", "Vaccination"], ["FLOCK_CHANGE", "Flock change"], ["LOSS", "Damage/Loss"], ["OTHER", "Others"]]
+      },
+      minCols: 4,
+      // All activities (default): the total plus the top 3 types. Exactly as before.
       cards: [
         { label: "Total Activities", summaryKey: "total_activities", format: "int", caption: "In the selected period" }
       ],
       dynamicCards: (sum) => (Array.isArray(sum.by_type) ? sum.by_type : [])
         .slice().sort((a, b) => b.value - a.value).slice(0, 3)
         .map((t) => ({ label: repPretty(t.label), value: t.value, format: "int", caption: "Activities of this type" })),
+      // One type picked: cards for that type. A missing backend key shows "—".
+      cardsByType: {
+        FEED_CONSUMPTION: [ACT_CARD("Total Feed Used", "total_quantity", "int"), ACT_CARD("Feed Cost", "total_cost", "money"), ACT_CARD("Avg Cost/Unit", "avg_cost_per_unit", "money")],
+        MORTALITY:        [ACT_CARD("Birds Lost", "total_birds_lost", "int"), ACT_CARD("Mortality Events", "event_count", "int")],
+        MEDICATION:       [ACT_CARD("Total Treatments", "total_treatments", "int"), ACT_CARD("Medication Cost", "total_cost", "money")],
+        VACCINATION:      [ACT_CARD("Total Vaccinations", "total_vaccinations", "int")],
+        FLOCK_CHANGE:     [ACT_CARD("Total Changes", "total_changes", "int")],
+        LOSS:             [ACT_CARD("Total Quantity Lost", "total_quantity", "int"), ACT_CARD("Value Lost", "total_value_lost", "money"), ACT_CARD("Loss Events", "event_count", "int")]
+      },
       chartPrimary: {
         views: [
           { id: "day", toggle: "Per Day", title: "Activities per day", subject: "activities",
             source: "trend", type: "bar", seriesKeys: ["count"], labels: ["Activities"], colors: ["green"],
             format: "int", ints: true, guard: "series" },
           { id: "type", toggle: "By Type", title: "Activities by type", sub: "Share of activities in this period",
-            source: "stats.by_type", type: "donut", format: "int", guard: "breakdown" }
+            source: "stats.by_type", type: "donut", format: "int", guard: "breakdown", allOnly: true }
         ]
       }
     },
@@ -244,6 +271,43 @@
     }
   };
 
+  /* =====================================================================
+     FARM ACTIVITIES: table columns by selected activity type
+     Same shape as COLS: [header, fn, isNumeric, truncate].
+     With "All activities" (or any type not listed here, such as Vaccination) the normal
+     COLS.activity is used. ROW_ACTIONS still draws the Actions column for every layout.
+     ===================================================================== */
+  // The flock's identifier. Falls back to whatever is on the row when the flock is not in the loaded list.
+  const actFlock = (r) => {
+    const f = (state.data.flock || []).find((x) => String(x.id) === String(r.flock));
+    return f ? f.identifier : (r.flock || "");
+  };
+  // The item name. Uses item_name from normActivity, then falls back to the items lookup if only an id came back.
+  // Adjust "state.lookups" to wherever you keep the lookup lists.
+  const actItem = (r) => {
+    if (r.item_name) return r.item_name;
+    const list = (state.lookups && state.lookups.items) || [];
+    const it = list.find((x) => String(x.id) === String(r.item));
+    return it ? it.name : "";
+  };
+  // Quantity with its unit when there is one, for example "12 Bag".
+  const actQty = (r) => (r.quantity == null ? "" : repInt(r.quantity) + (r.unit ? " " + r.unit : ""));
+  const A_DATE = ["Date", (r) => fmtDate(r.date)];
+  const A_FLOCK = ["Flock", actFlock];
+
+  const ACTIVITY_COLS = {
+    FEED_CONSUMPTION: [A_DATE, ["Item", actItem], ["Quantity", actQty, true], A_FLOCK],
+    MORTALITY:        [A_DATE, A_FLOCK, ["Quantity Lost", (r) => repInt(r.quantity), true], ["Reason", (r) => r.notes, false, true]],
+    FLOCK_CHANGE:     [A_DATE, A_FLOCK, ["Details", (r) => r.notes, false, true]]
+  };
+  ACTIVITY_COLS.MEDICATION = ACTIVITY_COLS.FEED_CONSUMPTION;
+  ACTIVITY_COLS.LOSS = ACTIVITY_COLS.MORTALITY;
+  ACTIVITY_COLS.OTHER = ACTIVITY_COLS.FLOCK_CHANGE;
+
+  // The columns the table uses right now. Anything but a picked activity type uses the normal COLS.
+  const repTableCols = (type, s) =>
+    (type === "activity" && s && ACTIVITY_COLS[s.activityType]) || COLS[type];
+
   // Which layout a tab uses.
   function recordsView(type) {
     if (TAB_REPORT_CONFIG[type] && !TAB_REPORT_CONFIG[type].ownsTable && REPORT_ENABLED.includes(type)) {
@@ -300,6 +364,7 @@
   const repOf = (type) => REP[type] || (REP[type] = {
     preset: "30d", from: "", to: "",        // date range (what the last fetch used)
     filter: "", page: 0, view: null,        // table dropdown, table page, chart view id (null = first view)
+    activityType: "",                       // Farm Activities "Activity type" ("" = all); sent to the backend
     status: "idle",                         // idle | loading | refreshing | ready | error
     data: null, error: null,                // { stats, trend, breakdown, errors } from the API
     farmId: null, sig: "", seq: 0
@@ -349,7 +414,7 @@
 
   // Switching farms starts the report from scratch.
   function repSync(type, s) {
-    if (s.farmId !== state.farmId) Object.assign(s, { farmId: state.farmId, filter: "", page: 0, data: null, error: null, status: "idle", sig: "" });
+    if (s.farmId !== state.farmId) Object.assign(s, { farmId: state.farmId, filter: "", activityType: "", page: 0, data: null, error: null, status: "idle", sig: "" });
   }
 
   // The dates the table is limited to. Same rule as the backend: from (today - days) to today.
@@ -361,7 +426,11 @@
     start.setDate(start.getDate() - (parseInt(s.preset, 10) || 30));
     return { from: localISO(start), to: localISO(end) };
   }
-  const repRange = (s) => (s.preset === "custom" ? { start_date: s.from, end_date: s.to } : AgroAPI.dateRange(s.preset));
+  // The date range, plus activity_type when a type is picked (the API only sends it to stats and trend).
+  const repRange = (s) => {
+    const r = s.preset === "custom" ? { start_date: s.from, end_date: s.to } : AgroAPI.dateRange(s.preset);
+    return s.activityType ? Object.assign({}, r, { activity_type: s.activityType }) : r;
+  };
 
   /* ---------- fetching (backend-driven part) ---------- */
   async function loadReport(type) {
@@ -438,6 +507,11 @@
           <label for="rep-filter">${esc(cfg.filter.label)}</label>
           <div class="rep-sel"><select id="rep-filter"><option value="">${esc(cfg.filter.all)}</option>${repFilterOpts(type, s)}</select>${icon("chevronDown", 16)}</div>
         </div>` : "";
+    const tf = cfg.typeFilter;
+    const typeHTML = tf ? `<div class="rep-field">
+          <label for="rep-type">${esc(tf.label)}</label>
+          <div class="rep-sel"><select id="rep-type"><option value="">${esc(tf.all)}</option>${tf.options.map(([v, l]) => `<option value="${esc(v)}"${v === s.activityType ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>${icon("chevronDown", 16)}</div>
+        </div>` : "";
     const searchHTML = cfg.ownsTable ? "" : `<div class="rep-field grow">
           <label for="rep-search">Search</label>
           <div class="rep-search">${icon("search", 16)}<input class="rep-input" type="search" id="rep-search" placeholder="Search records..." autocomplete="off" value="${esc(state.query)}"></div>
@@ -445,7 +519,7 @@
     const applyHTML = dated ? `<button class="btn" type="button" data-action="rep-apply"${repBusy(s) ? " disabled" : ""}>${icon("filter", 14)}Apply filters</button>` : "";
     const exportHTML = cfg.ownsTable ? "" : `<button class="btn ghost" type="button" data-action="export-records" data-type="${type}">${icon("download", 14)}Export</button>`;
     return `<section class="card rep-filters" aria-label="Filters">
-        ${dateHTML}${filterHTML}${searchHTML}
+        ${dateHTML}${filterHTML}${typeHTML}${searchHTML}
         <div class="rep-actions">${applyHTML}${exportHTML}</div>
       </section>`;
   }
@@ -485,32 +559,41 @@
     return `<span class="rep-badge ${cls}">${x > 0 ? "+" : ""}${x.toFixed(1)}%</span>`;
   }
 
+  // Which cards a tab shows right now. With a type picked (Farm Activities) it is that type's own set;
+  // otherwise the normal cards, plus the dynamic ones when the tab has them and no type is picked.
+  function repCardSet(cfg, s) {
+    const typed = cfg.cardsByType && s.activityType && cfg.cardsByType[s.activityType];
+    if (typed) return { cards: typed, dynamic: false };
+    return { cards: cfg.cards, dynamic: !!cfg.dynamicCards && !s.activityType };
+  }
+
   function repCardDefs(type, s) {
-    const cfg = repCfg(type);
+    const cfg = repCfg(type), set = repCardSet(cfg, s);
     const st = s.data && s.data.stats;
     const sum = (st && st.summary) || {};
     const tr = (st && st.trends) || {};
-    const out = cfg.cards.map((c) => ({
+    const out = set.cards.map((c) => ({
       label: c.label, value: sum[c.summaryKey], format: c.format,
       hasTrend: !!c.trendKey, trend: c.trendKey ? tr[c.trendKey] : null,
       inverse: !!c.inverse, warn: !!c.warn, caption: c.caption || "",
       note: c.note ? c.note(sum) : ""
     }));
-    if (cfg.dynamicCards && st) {
+    if (set.dynamic && st) {
       cfg.dynamicCards(sum).forEach((d) => out.push({ label: d.label, value: d.value, format: d.format || "int", hasTrend: false, trend: null, inverse: false, warn: false, caption: d.caption || "", note: "" }));
     }
     return out;
   }
+  const repCardCount = (cfg, s) => { const set = repCardSet(cfg, s); return set.cards.length + (set.dynamic ? 3 : 0); };
   function repCols(type, s) {
     const cfg = repCfg(type);
-    const n = s.data && s.data.stats ? repCardDefs(type, s).length : cfg.cards.length + (cfg.dynamicCards ? 3 : 0);
-    return Math.min(5, Math.max(1, n));
+    const n = s.data && s.data.stats ? repCardDefs(type, s).length : repCardCount(cfg, s);
+    return Math.min(5, Math.max(cfg.minCols || 1, n));
   }
 
   function cardsHTML(type, s) {
     const cfg = repCfg(type);
     if (!s.data && repBusy(s)) {
-      const n = cfg.cards.length + (cfg.dynamicCards ? 3 : 0);
+      const n = repCardCount(cfg, s);
       return Array.from({ length: n }, () => `<div class="card rep-card"><span class="rep-skel" style="width:46%;height:12px"></span><span class="rep-skel" style="width:62%;height:26px;margin:14px 0"></span><span class="rep-skel" style="width:30%;height:18px"></span></div>`).join("");
     }
     const st = s.data && s.data.stats;
@@ -571,6 +654,8 @@
       const why = (s.status === "error" && s.error && s.error.message) || "The chart data could not be loaded.";
       return `<div class="rep-msg"><span>${esc(why)}</span><button class="btn ghost" type="button" data-action="rep-retry">Try again</button></div>`;
     }
+    // A breakdown across types means nothing once a single type is picked.
+    if (v.allOnly && s.activityType) return `<div class="rep-msg"><span>The breakdown by type isn't shown while a single activity type is selected. Choose “All activities” to see it.</span></div>`;
     const rows = repViewRows(s, v);
     const guard = repGuardMsg(v, rows);
     if (guard) return `<div class="rep-msg"><span>${esc(guard)}</span></div>`;
@@ -743,8 +828,13 @@
       rows = rows.filter((r) => (!b.from || String(r.date) >= b.from) && (!b.to || String(r.date) <= b.to));
     }
     if (cfg.filter && s.filter) rows = rows.filter((r) => String(r[cfg.filter.field]) === s.filter);
+    if (cfg.typeFilter && s.activityType) rows = rows.filter((r) => String(r.code) === s.activityType);   // rows carry the backend code
     const q = state.query.trim().toLowerCase();
-    if (q) rows = rows.filter((r) => COLS[type].map(([, fn]) => String(fn(r) ?? "")).join(" ").toLowerCase().includes(q));
+    if (q) {
+      // Search what is on screen: for Farm Activities the columns change with the picked type.
+      const cols = repTableCols(type, s);
+      rows = rows.filter((r) => cols.map(([, fn]) => String(fn(r) ?? "")).join(" ").toLowerCase().includes(q));
+    }
     return rows;
   }
 
@@ -762,7 +852,8 @@
     const slice = rows.slice(start, start + REP_PAGE);
     const from = total ? start + 1 : 0;
     const to = Math.min(total, start + REP_PAGE);
-    const cols = COLS[type];
+    // For Farm Activities the columns depend on the picked activity type; every other tab uses COLS.
+    const cols = repTableCols(type, s);
     const rowAction = ROW_ACTIONS[type];
     const head = cols.map(([h, , n]) => `<th class="${n ? "num" : ""}">${esc(h)}</th>`).join("") + (rowAction ? `<th class="num">Actions</th>` : "");
     const cell = (r, [, fn, n, trunc]) => {
@@ -848,6 +939,8 @@
       if (!custom) { s.preset = e.target.value; s.page = 0; loadReport(type); } // a ready-made range fetches straight away
     } else if (e.target.id === "rep-filter") {
       s.filter = e.target.value; s.page = 0; paintTable(type);                 // frontend only: no API call
+    } else if (e.target.id === "rep-type") {
+      s.activityType = e.target.value; s.page = 0; loadReport(type);           // backend: re-fetches stats + trend for that type
     }
   });
 

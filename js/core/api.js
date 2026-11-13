@@ -315,6 +315,12 @@
       quantity: a.quantity != null ? n(a.quantity) : null,
       // The raw notes, kept apart from "details" (which falls back to the quantity) so Adjust shows the real value.
       notes: a.notes || "",
+      // The item used (feed, medication) as an id plus a readable name, so the Farm Activities table can show
+      // an "Item" column. Both are empty when the backend does not send an item for this activity.
+      item: idOf(a.item),
+      item_name: a.item_name || nameOf(a.item) || "",
+      // The unit of the quantity (Bag, Kg ...). Empty when the backend does not send one.
+      unit: unitOf(a.unit_name != null ? a.unit_name : a.unit),
       created_at: a.created_at, created_by: a.created_by_name || ""
     };
   };
@@ -587,12 +593,18 @@
   };
 
   // range is { days: 30 } or { start_date: "2026-01-01", end_date: "2026-11-13" }.
-  function reportQuery(range) {
+  // range.activity_type (optional, Farm Activities only) narrows stats and trend to one type, for example
+  // "FEED_CONSUMPTION". It is only added when withType is true, so the breakdown request never carries it.
+  function reportQuery(range, withType) {
     range = range || {};
+    const p = [];
     if (range.start_date && range.end_date) {
-      return "?start_date=" + encodeURIComponent(range.start_date) + "&end_date=" + encodeURIComponent(range.end_date);
+      p.push("start_date=" + encodeURIComponent(range.start_date), "end_date=" + encodeURIComponent(range.end_date));
+    } else {
+      p.push("days=" + Math.max(1, parseInt(range.days, 10) || 30));
     }
-    return "?days=" + Math.max(1, parseInt(range.days, 10) || 30);
+    if (withType && range.activity_type) p.push("activity_type=" + encodeURIComponent(range.activity_type));
+    return "?" + p.join("&");
   }
 
   // Turns the date-range dropdown value into a range object.
@@ -1270,19 +1282,21 @@
     //   errors    : { stats?, trend?, breakdown? } with the ApiError of any request that failed
     // type: "production" | "sales" | "purchase" | "expense" | "flock" | "activity" | "inventory"
     // range: { days } or { start_date, end_date }  (see AgroAPI.dateRange)
+    //        plus an optional activity_type (Farm Activities): sent to stats and trend only.
     getRecordsReport: async function (farmId, type, range) {
       const ep = REPORT_ENDPOINTS[type];
       if (!ep) throw new Error("No report endpoints for record type: " + type);
       if (isMock) { await wait(300); return { stats: null, trend: [], breakdown: [], errors: {} }; }
 
       const base = farmUrl(ep.base, farmId);
-      const q = reportQuery(range);
-      const get = function (suffix, dated) {
-        return suffix ? request("GET", base + suffix + (dated ? q : "")) : Promise.resolve(null);
+      const q = reportQuery(range);            // dates only
+      const qt = reportQuery(range, true);     // dates + activity_type, for stats and trend
+      const get = function (suffix, dated, typed) {
+        return suffix ? request("GET", base + suffix + (dated ? (typed ? qt : q) : "")) : Promise.resolve(null);
       };
       const r = await Promise.allSettled([
-        get(ep.stats, true),
-        get(ep.trend, true),
+        get(ep.stats, true, true),
+        get(ep.trend, true, true),
         get(ep.breakdown, ep.breakdownDated !== false)
       ]);
 
