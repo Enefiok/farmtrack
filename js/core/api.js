@@ -40,6 +40,7 @@
       payments: "/api/farms/{farm}/payments/",
       // Financial, operations and alert summary for the Dashboard. Takes ?days=30 (or 7, 90 ...).
       dashboard: "/api/farms/{farm}/dashboard/",
+      reports: "/api/farms/{farm}/reports/",
     },
     DEFAULTS: { eggUnitId: 2, eggItemId: null },
   };
@@ -591,7 +592,8 @@
   };
 
   // Keys whose values are text labels, so a numeric-looking string there is NOT turned into a number.
-  const LABEL_KEYS = ["date", "day", "label", "name", "customer", "category", "stage", "type", "party", "party_name", "period", "unit"];
+  const LABEL_KEYS = ["date", "day", "label", "name", "customer", "category", "stage", "type", "party", "party_name", "period", "unit",
+    "identifier", "flock", "item", "week_start", "last_order", "at", "entry_timestamp", "target", "segment", "reason", "text", "severity", "metric", "as_of", "group", "key", "title", "desc", "icon", "actor", "recorded_by"];
 
   // Decimals arrive as strings ("150.00"); the charts and cards need numbers. Works on any nested shape.
   function numDeep(v, key) {
@@ -1293,6 +1295,21 @@
       const d = Math.max(1, parseInt(days, 10) || 30);
       if (isMock) { await wait(300); return normDashboard({ period: { days: d } }); }
       return normDashboard(await request("GET", farmUrl("dashboard", farmId) + "?days=" + d));
+    },
+
+    // ---------- Reports hub + 12 document-style reports ----------
+    // Catalog of all reports for the hub page.
+    getReportIndex: async function (farmId) {
+      if (isMock) { await wait(200); return []; }
+      return numDeep(await request("GET", farmUrl("reports", farmId) + "index/"));
+    },
+    // reportKey: pl | cash-flow | inventory-valuation | audit | fcr | hhep | cost-per-crate | flock-roi |
+    //            feed-forecast | customer-lifecycle | traceability | period-comparison
+    // params: { days: 30 } or { date: "2026-11-13" }
+    getReport: async function (farmId, reportKey, params) {
+      if (isMock) { await wait(200); return { insights: [] }; }
+      const qs = new URLSearchParams(params || {}).toString();
+      return numDeep(await request("GET", farmUrl("reports", farmId) + encodeURIComponent(reportKey) + "/" + (qs ? "?" + qs : "")));
     },
 
     // ---------- Records page: summary cards, trend chart and breakdown chart ----------

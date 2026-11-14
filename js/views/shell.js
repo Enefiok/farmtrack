@@ -74,8 +74,9 @@
       if (state.inventory.farmId !== state.farmId) state.inventory = { items: [], units: [], status: "idle", farmId: state.farmId };
       if (state.inventory.status === "idle") loadInventory();
       view.innerHTML = inventoryView();
+    } else if (page === "reports") {
+      view.innerHTML = reportsView(sub);
     } else {
       view.innerHTML = comingSoon(names[page]);
     }
   }
-
