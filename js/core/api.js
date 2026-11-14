@@ -260,6 +260,10 @@
 
   // ---------- server data: pagination + number parsing ----------
   const n = function (v) { const x = parseFloat(v); return Number.isFinite(x) ? x : 0; };
+  // When a record was created. Servers name this differently, so accept the common names.
+  const stampOf = function (x) {
+    return x.created_at || x.entry_timestamp || x.created || x.timestamp || x.created_on || x.updated_at || x.modified_at || "";
+  };
 
   // DRF gives absolute "next" URLs; request() adds API_BASE itself, so keep only path + query.
   const toPath = function (u) {
@@ -289,7 +293,7 @@
       arrival_date: f.arrival_date, age_at_arrival: f.age_at_arrival,
       starting_count: n(f.initial_count), current_count: n(f.current_count),
       mortality_rate: n(f.mortality_rate), stage: f.stage || "", status: f.status || "",
-      created_at: f.created_at, created_by: f.created_by_name || ""
+      created_at: stampOf(f), created_by: f.created_by_name || ""
     };
   };
   const normProduction = function (p) {
@@ -304,7 +308,7 @@
       unit_damaged: unitOf(p.unit_damaged != null ? p.unit_damaged : p.unit),
       // kept so any existing table column that reads "packaging" still shows something
       packaging: unitOf(p.unit_collected != null ? p.unit_collected : (p.unit != null ? p.unit : p.packaging)),
-      recorded_by: p.created_by_name || "", created_at: p.created_at, created_by: p.created_by_name || ""
+      recorded_by: p.created_by_name || "", created_at: stampOf(p), created_by: p.created_by_name || ""
     };
   };
   const normActivity = function (a) {
@@ -321,7 +325,7 @@
       item_name: a.item_name || nameOf(a.item) || "",
       // The unit of the quantity (Bag, Kg ...). Empty when the backend does not send one.
       unit: unitOf(a.unit_name != null ? a.unit_name : a.unit),
-      created_at: a.created_at, created_by: a.created_by_name || ""
+      created_at: stampOf(a), created_by: a.created_by_name || ""
     };
   };
 
@@ -399,7 +403,7 @@
       outstanding_balance: pay.outstanding_balance,
       payments: paymentsOf(x),
       notes: x.notes || "",
-      created_at: x.created_at, created_by: x.created_by_name || ""
+      created_at: stampOf(x), created_by: x.created_by_name || ""
     };
   };
   // A purchase on the server has the same shape as a sale: a supplier ("party") plus one or more
@@ -430,7 +434,7 @@
       outstanding_balance: pay.outstanding_balance,
       payments: paymentsOf(x),
       notes: x.notes || "",
-      created_at: x.created_at, created_by: x.created_by_name || ""
+      created_at: stampOf(x), created_by: x.created_by_name || ""
     };
   };
   // One adjustment (a correction made to a record). "changes" is a list of { field, old_value, new_value };
@@ -467,7 +471,7 @@
       amount_paid: pay.amount_paid,
       outstanding_balance: pay.outstanding_balance,
       payments: paymentsOf(x),
-      created_at: x.created_at, created_by: x.created_by_name || ""
+      created_at: stampOf(x), created_by: x.created_by_name || ""
     };
   };
 
