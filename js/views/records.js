@@ -188,7 +188,7 @@
       typeFilter: {
         label: "Activity type", all: "All activities",
         options: [["FEED_CONSUMPTION", "Feed consumption"], ["MORTALITY", "Mortality"], ["MEDICATION", "Medication"],
-                  ["VACCINATION", "Vaccination"], ["FLOCK_CHANGE", "Flock change"], ["LOSS", "Damage/Loss"], ["OTHER", "Others"]]
+                  ["VACCINATION", "Vaccination"], ["FLOCK_CHANGE", "Flock change"], ["LOSS", "Damage"], ["OTHER", "Others"]]
       },
       minCols: 4,
       // All activities (default): the total plus the top 3 types. Exactly as before.
@@ -280,30 +280,35 @@
      ===================================================================== */
   // The flock's identifier. Falls back to whatever is on the row when the flock is not in the loaded list.
   const actFlock = (r) => {
+    if (!r.flock) return "—";
     const f = (state.data.flock || []).find((x) => String(x.id) === String(r.flock));
-    return f ? f.identifier : (r.flock || "");
+    return f ? f.identifier : String(r.flock);
   };
-  // The item name. Uses item_name from normActivity, then falls back to the items lookup if only an id came back.
-  // Adjust "state.lookups" to wherever you keep the lookup lists.
+  // The item name: from the backend when it sends one, else read from the feed summary, else the items lookup.
   const actItem = (r) => {
     if (r.item_name) return r.item_name;
+    const parsed = r.code === "FEED_CONSUMPTION" ? (actParts(r).f || [])[0] : "";
+    if (parsed) return parsed;
     const list = (state.lookups && state.lookups.items) || [];
     const it = list.find((x) => String(x.id) === String(r.item));
-    return it ? it.name : "";
+    return it ? it.name : "—";
   };
-  // Quantity with its unit when there is one, for example "12 Bag".
-  const actQty = (r) => (r.quantity == null ? "" : repInt(r.quantity) + (r.unit ? " " + r.unit : ""));
   const A_DATE = ["Date", (r) => fmtDate(r.date)];
   const A_FLOCK = ["Flock", actFlock];
+  const A_NOTES = ["Notes", actNotes, false, true];
+  const A_QTY = (label) => [label, (r) => (r.quantity == null ? "—" : fmtQty(r.quantity)), true];
 
+  // One column set per type, in the order of that type's form fields (see the tabs in schemas.js). Types whose form
+  // has no Flock field (Flock change, Damage, Others) have no Flock column either.
   const ACTIVITY_COLS = {
-    FEED_CONSUMPTION: [A_DATE, ["Item", actItem], ["Quantity", actQty, true], A_FLOCK],
-    MORTALITY:        [A_DATE, A_FLOCK, ["Quantity Lost", (r) => repInt(r.quantity), true], ["Reason", (r) => r.notes, false, true]],
-    FLOCK_CHANGE:     [A_DATE, A_FLOCK, ["Details", (r) => r.notes, false, true]]
+    FEED_CONSUMPTION: [A_DATE, ["Feed item", actItem], ["Quantity", actQtyText, true], A_FLOCK, A_NOTES],
+    MORTALITY:        [A_DATE, A_FLOCK, A_QTY("Birds lost"), ["Reason / cause", actPart(0), false, true], A_NOTES],
+    MEDICATION:       [A_DATE, A_FLOCK, ["Product", actPart(0)], ["Quantity / dose", actPart(1)], ["Next due", actPart(2)], A_NOTES],
+    FLOCK_CHANGE:     [A_DATE, ["Change type", actPart(0)], A_QTY("Quantity"), ["Reason", actPart(2), false, true], A_NOTES],
+    LOSS:             [A_DATE, ["Affected item / quantity", actPart(0), false, true], ["Reason", actPart(1), false, true], A_NOTES],
+    OTHER:            [A_DATE, ["Type / description", actPart(0), false, true], ["Reason", actPart(1), false, true], A_NOTES],
+    VACCINATION:      [A_DATE, A_FLOCK, A_NOTES]
   };
-  ACTIVITY_COLS.MEDICATION = ACTIVITY_COLS.FEED_CONSUMPTION;
-  ACTIVITY_COLS.LOSS = ACTIVITY_COLS.MORTALITY;
-  ACTIVITY_COLS.OTHER = ACTIVITY_COLS.FLOCK_CHANGE;
 
   // The columns the table uses right now. Anything but a picked activity type uses the normal COLS.
   const repTableCols = (type, s) =>
