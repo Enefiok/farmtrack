@@ -55,10 +55,18 @@
     },
     async load() {
       if (!DEV) {
-        const [data, lookups] = await Promise.all([AgroAPI.loadFarmData(state.farmId), AgroAPI.loadLookups(state.farmId)]);
-        state.data = { ...emptyData(), ...data };
+        const id = state.farmId;
+        const [data, lookups] = await Promise.all([AgroAPI.loadFarmData(id, { skipAdjustments: true }), AgroAPI.loadLookups(id)]);
+        // Keep the adjustment list already on screen (same farm) so a reload after a save never flashes it empty.
+        const keepAdj = state.adjFarmId === id && state.data && Array.isArray(state.data.adjustment) ? state.data.adjustment : [];
+        state.data = { ...emptyData(), ...data, adjustment: keepAdj };
         state.lookups = { customers: [], suppliers: [], items: [], ...lookups };
         resolveNames();
+        // The audit log loads in the background: the app is usable without it, and the View windows read it when opened.
+        AgroAPI.listAdjustments(id).then((list) => {
+          if (id !== state.farmId) return;   // the user switched farms meanwhile
+          state.data.adjustment = list; state.adjFarmId = id;
+        }).catch((err) => console.warn("Could not load adjustments:", err.status, err.data));
         return;
       }
       await delay(150);
@@ -247,4 +255,3 @@
     }
     return d;
   }
-

@@ -271,8 +271,28 @@
   };
 
   // Follows every "next" link so all records load, not just the first page.
+  // The first page tells us how many records there are, so when the server uses page numbers the remaining
+  // pages are fetched a few at a time in parallel instead of one after another. Any other kind of paging
+  // (cursor, offset) falls back to following "next" one page at a time, exactly as before.
   async function listAll(path) {
-    let url = path, out = [], guard = 0;
+    const first = await request("GET", path);
+    if (Array.isArray(first)) return first;
+    const firstRows = (first && first.results) || [];
+    if (first && first.next && firstRows.length && Number.isFinite(Number(first.count))) {
+      const next = toPath(first.next);
+      const pages = Math.ceil(Number(first.count) / firstRows.length);
+      if (next && /[?&]page=2(&|$)/.test(next) && pages > 2 && pages <= 200) {
+        const pageUrl = function (n) { return next.replace(/([?&]page=)\d+/, "$1" + n); };
+        const out = [firstRows];
+        for (let start = 2; start <= pages; start += 5) {
+          const batch = [];
+          for (let n = start; n < start + 5 && n <= pages; n++) batch.push(request("GET", pageUrl(n)));
+          (await Promise.all(batch)).forEach(function (d) { out.push((d && d.results) || []); });
+        }
+        return [].concat.apply([], out);
+      }
+    }
+    let url = first && first.next ? toPath(first.next) : null, out = firstRows.slice(), guard = 0;
     while (url && guard++ < 200) {
       const d = await request("GET", url);
       if (Array.isArray(d)) return out.concat(d);
@@ -306,6 +326,8 @@
       // so fall back to that when the new fields are missing.
       unit_collected: unitOf(p.unit_collected != null ? p.unit_collected : p.unit),
       unit_damaged: unitOf(p.unit_damaged != null ? p.unit_damaged : p.unit),
+      // Saleable is calculated by the backend; use its unit if it sends one, otherwise the collected unit.
+      unit_saleable: unitOf(p.unit_saleable != null ? p.unit_saleable : (p.unit_collected != null ? p.unit_collected : p.unit)),
       // kept so any existing table column that reads "packaging" still shows something
       packaging: unitOf(p.unit_collected != null ? p.unit_collected : (p.unit != null ? p.unit : p.packaging)),
       recorded_by: p.created_by_name || "", created_at: stampOf(p), created_by: p.created_by_name || ""
@@ -1323,7 +1345,10 @@
     getRecordBreakdown: async function (farmId, type, range) { return (await AgroAPI.getRecordsReport(farmId, type, range)).breakdown; },
 
     // Loads every page of every record type for a farm.
-    loadFarmData: async function (farmId) {
+    // opts.skipAdjustments: leave the audit log out. It is only read inside the View windows, so the app
+    // can show the farm without waiting for it (state.load fetches it in the background).
+    loadFarmData: async function (farmId, opts) {
+      const skipAdj = !!(opts && opts.skipAdjustments);
       const r = await Promise.all([
         AgroAPI.listFlocks(farmId),
         AgroAPI.listProduction(farmId),
@@ -1332,9 +1357,11 @@
         AgroAPI.listPurchases(farmId),
         AgroAPI.listExpenses(farmId),
         // The audit log must never stop the app from loading, so a failed list becomes an empty one.
-        AgroAPI.listAdjustments(farmId).catch(function (err) { console.warn("Could not load adjustments:", err.status, err.data); return []; }),
+        skipAdj ? Promise.resolve(null) : AgroAPI.listAdjustments(farmId).catch(function (err) { console.warn("Could not load adjustments:", err.status, err.data); return []; }),
       ]);
-      return { flock: r[0], production: r[1], activity: r[2], sales: r[3], purchase: r[4], expense: r[5], adjustment: r[6] };
+      const out = { flock: r[0], production: r[1], activity: r[2], sales: r[3], purchase: r[4], expense: r[5] };
+      if (!skipAdj) out.adjustment = r[6];
+      return out;
     },
 
     // ---------- Adjustments and corrections ----------

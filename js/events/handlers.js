@@ -63,6 +63,7 @@
       case "manage-conversions": openConversionsModal(act.dataset.id, act); break;
       case "stock-history": openStockHistoryModal(act.dataset.id, act); break;
       case "export-inventory": exportInventory(); break;
+      case "inv-chart-view": state.invChartView = act.dataset.view; renderView(); break;
       case "inv-stock-filter": state.invStock = act.dataset.value; renderView(); break;
       case "retry-inventory": state.inventory.status = "idle"; renderView(); break;
       case "toggle-note": {

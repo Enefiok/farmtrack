@@ -153,7 +153,6 @@ function dashboardView() {
             <div class="legend">
               <span>Income <i style="background:#147a3a"></i></span>
               <span>Expenses <i style="background:#f3b93a"></i></span>
-              <span>Profit <i style="background:#3b6fd4"></i></span>
               ${fin.gran === "day" ? "" : `<select class="range" id="range" aria-label="Chart view">
                 <option value="monthly" ${state.range === "monthly" ? "selected" : ""}>Monthly View</option>
                 <option value="quarterly" ${state.range === "quarterly" ? "selected" : ""}>Quarterly View</option>

@@ -7,10 +7,12 @@
      The 4th flag only shortens the text on screen (with the full text in a tooltip);
      the CSV export and the search box still use the full text.
      ===================================================================== */
+  // A production quantity with its own unit (Egg, Tray, Crate), e.g. "5 Crate". No unit on file = bare number.
+  const prodQty = (v, unit) => fmtInt(v) + (unit ? " " + unit : "");
   const COLS = {
     flock: [["Identifier", (r) => r.identifier], ["Breed/Type", (r) => r.breed], ["Arrival date", (r) => fmtDate(r.arrival_date)], ["Starting count", (r) => fmtInt(r.starting_count), 1], ["Current count", (r) => fmtInt(r.current_count), 1], ["Stage", (r) => r.stage], ["Status", (r) => r.status]],
     // The egg counts are numbers of eggs. The packaging (Loose eggs, Trays, Crates) is shown next to the saleable number.
-    production: [["Date", (r) => fmtDate(r.date)], ["Flock", (r) => flockName(r.flock)], ["Collected", (r) => fmtInt(r.collected), 1], ["Damaged", (r) => fmtInt(r.damaged || 0), 1], ["Saleable", (r) => fmtInt(r.saleable) + (r.packaging ? " " + r.packaging : ""), 1], ["Recorded by", (r) => r.recorded_by]],
+    production: [["Date", (r) => fmtDate(r.date)], ["Flock", (r) => flockName(r.flock)], ["Collected", (r) => prodQty(r.collected, r.unit_collected), 1], ["Damaged", (r) => prodQty(r.damaged || 0, r.unit_damaged), 1], ["Saleable", (r) => prodQty(r.saleable, r.unit_saleable || r.unit_collected), 1], ["Recorded by", (r) => r.recorded_by]],
     sales: [["Date", (r) => fmtDate(r.date)], ["Customer", (r) => r.customer], ["Product", (r) => r.product], ["Quantity", (r) => unitQty(r), 1], ["Total", (r) => fmtMoney(r.total), 1], ["Outstanding", (r) => fmtMoney(r.outstanding_balance || 0), 1]],
     purchase: [["Date", (r) => fmtDate(r.date)], ["Supplier", (r) => r.supplier], ["Item", (r) => r.item], ["Quantity", (r) => unitQty(r), 1], ["Total cost", (r) => fmtMoney(r.total_cost), 1], ["Outstanding", (r) => fmtMoney(r.outstanding_balance || 0), 1]],
     expense: [["Date", (r) => fmtDate(r.date)], ["Supplier", (r) => r.supplier || "—"], ["Description", (r) => r.description, 0, 1], ["Amount", (r) => fmtMoney(r.amount), 1], ["Outstanding", (r) => fmtMoney(r.outstanding_balance || 0), 1]],
@@ -42,4 +44,3 @@
   const visibleTabs = () => TABS.filter(([k]) => k !== "production" || hasEggs());
   const NAV = [["dashboard", "Dashboard"], ["records", "Records"], ["inventory", "Inventory"], ["reports", "Reports"], ["users", "Users & Permissions"]];
   const NAV_ICON = { dashboard: "dashboard", records: "records", inventory: "inventory", reports: "reports", users: "users" };
-

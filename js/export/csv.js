@@ -14,10 +14,24 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
+  // Exports what the table is showing. Report tabs use the same rows (date range, flock/customer/supplier/category,
+  // activity type, search) and the same columns as the on-screen table; other tabs export every record.
   function exportRecords(type) {
-    const rows = newestFirst(state.data[type]);
-    if (!rows.length) { toast("There are no records to export yet."); return; }
-    downloadCSV(type, [COLS[type].map((c) => c[0]), ...rows.map((r) => COLS[type].map(([, fn]) => fn(r)))]);
+    const reportTab = typeof repCfg === "function" && TAB_REPORT_CONFIG[type] && !TAB_REPORT_CONFIG[type].ownsTable && REPORT_ENABLED.includes(type);
+    let rows, cols, filtered = false;
+    if (reportTab) {
+      const s = repOf(type);
+      if (!repData(type).length) { toast("There are no records to export yet."); return; }
+      rows = repRows(type, s);
+      cols = repTableCols(type, s);
+      filtered = true;
+    } else {
+      rows = newestFirst(state.data[type]);
+      cols = COLS[type];
+      if (!rows.length) { toast("There are no records to export yet."); return; }
+    }
+    if (!rows.length) { toast(filtered ? "No records match your filters, so there is nothing to export." : "There are no records to export yet."); return; }
+    downloadCSV(type, [cols.map((c) => c[0]), ...rows.map((r) => cols.map(([, fn]) => fn(r)))]);
   }
 
   // Exports what the dashboard is showing for the chosen period: the cards, then the Financial Overview table.

@@ -32,7 +32,8 @@
       if (silent && state.inventory.status === "ready") return;
       state.inventory.status = "error";
     }
-        if ((route().page === "inventory" || route().page === "dashboard") && state.status === "ready") renderView();
+    if ((route().page === "inventory" || route().page === "dashboard") && state.status === "ready") renderView();
+    if (state.inventory.status === "ready") loadInvConversions();   // quietly, for the packaging hint in the stock column
   }
 
   // The farm-wide item list that feeds the Sales, Purchase and Sell Birds forms comes from lookups, so refresh it too.
@@ -40,6 +41,7 @@
     // The Unit dropdown on the forms caches each item's units. Items or conversions just changed, so drop that cache.
     // (clearUnitCache lives in forms.js; the typeof check keeps this working until that file is updated.)
     if (typeof clearUnitCache === "function") clearUnitCache();
+    state.inventory.conv = {};   // conversions or items changed: the packaging hints are fetched again
     if (DEV) {
       state.lookups.items = state.inventory.items.map((i) => ({ id: i.id, name: i.name, category: i.category, base_unit_name: i.base_unit_name }));
       return;
@@ -63,11 +65,15 @@
     const inStock = known.filter((i) => i.current_stock > 0).length;
     const out = known.filter((i) => i.current_stock <= 0).length;
     const dash = known.length ? null : "—";
-    return `<div class="stats">
+    // Same rule as the dashboard's Stock Value card: tracked, active items that have a valuation.
+    const valued = tracked.filter((i) => i.is_active !== false && i.total_stock_value != null);
+    const value = valued.length ? fmtMoney(valued.reduce((t, i) => t + num(i.total_stock_value), 0)) : "—";
+    return `<div class="stats five">
       ${invStatCard("inventory", "Total items", fmtInt(total), "In your inventory")}
       ${invStatCard("check", "Stock tracked", fmtInt(tracked.length), `of ${fmtInt(total)} items`)}
       ${invStatCard("egg", "In stock", dash || fmtInt(inStock), "Tracked items with stock")}
       ${invStatCard("alert", "Out of stock", dash || fmtInt(out), out ? "Needs restocking" : "Nothing to restock", out > 0)}
+      ${invStatCard("wallet", "Total value", value, "Current stock value")}
     </div>`;
   }
 
@@ -98,13 +104,87 @@
       (!cat || String(i.category).toUpperCase() === cat) && stockOk(i));
   }
 
+  /* ---------- Stock with its unit, packaging hint and status ---------- */
+  // Conversions per item, fetched quietly after the list loads so a stock figure can also be shown as, for
+  // example, "≈ 33.3 Crate". Keyed by farm + item; cleared whenever conversions or items change (refreshLookups).
+  const invConvKey = (id) => state.farmId + ":" + id;
+  let invConvSeq = 0;
+  async function loadInvConversions() {
+    const inv = state.inventory, farmId = state.farmId, seq = ++invConvSeq;
+    inv.conv = inv.conv || {};
+    const need = inv.items.filter((i) => i.is_stock_tracked && num(i.current_stock) > 0 && !(invConvKey(i.id) in inv.conv));
+    if (!need.length) return;
+    for (let k = 0; k < need.length; k += 4) {
+      await Promise.all(need.slice(k, k + 4).map(async (i) => {
+        try { inv.conv[invConvKey(i.id)] = DEV ? ((inv.devConv || {})[`dev-conv-${i.id}`] || []) : await AgroAPI.listConversions(farmId, i.id); }
+        catch { inv.conv[invConvKey(i.id)] = []; }   // no hint for this item; not retried until the cache is cleared
+      }));
+      if (farmId !== state.farmId || seq !== invConvSeq) return;
+    }
+    if (route().page === "inventory" && state.status === "ready") renderView();
+  }
+  // The stock written in the item's biggest unit that still gives at least 1 (a unit with factor 1 or less is skipped).
+  function invPack(i) {
+    const list = (state.inventory.conv || {})[invConvKey(i.id)], stock = num(i.current_stock);
+    if (!list || !(stock > 0)) return "";
+    let best = null;
+    list.forEach((c) => { const f = num(c.factor); if (f > 1 && !c.is_base_unit && stock / f >= 1 && (!best || f > best.f)) best = { f, name: c.unit_name }; });
+    return best ? `≈ ${fmtQty(stock / best.f)} ${best.name}` : "";
+  }
+  // [css class, label] for the Status column.
+  function invStatus(i) {
+    if (!i.is_stock_tracked) return ["off", "Not tracked"];
+    if (i.current_stock == null) return ["off", "Unknown"];
+    return i.current_stock > 0 ? ["on", "In stock"] : ["out", "Out of stock"];
+  }
+  const invDash = `<span style="color:var(--muted)">—</span>`;
+
+  /* ---------- Stock value chart (built from the loaded items, so it needs no extra request) ---------- */
+  let invChart = null;
+  const invView = () => (state.invChartView === "items" ? "items" : "category");
+  function invChartRows(view) {
+    const valued = state.inventory.items.filter((i) => i.is_stock_tracked && num(i.total_stock_value) > 0);
+    if (view === "items") return valued.map((i) => ({ label: i.name, value: num(i.total_stock_value) })).sort((a, b) => b.value - a.value).slice(0, 8);
+    const by = {};
+    valued.forEach((i) => { const c = categoryLabel(i.category); by[c] = (by[c] || 0) + num(i.total_stock_value); });
+    return Object.keys(by).map((l) => ({ label: l, value: by[l] }));
+  }
+  function invChartMsg(view, rows) {
+    if (!rows.length) return "Stock value appears once your items have stock and a cost. Record a purchase or production to start.";
+    if (view === "category" && rows.length < 2) return "Add stock in more than one category to see the breakdown.";
+    return "";
+  }
+  function invChartCard() {
+    const view = invView(), rows = invChartRows(view), msg = invChartMsg(view, rows);
+    const seg = [["category", "By category"], ["items", "Top items"]].map(([v, l]) => `<button type="button" data-action="inv-chart-view" data-view="${v}" aria-pressed="${v === view}">${l}</button>`).join("");
+    const body = msg ? `<div class="rep-msg"><span>${esc(msg)}</span></div>`
+      : `<div class="rep-chart-wrap" style="height:${view === "items" ? Math.max(200, rows.length * 44 + 60) : 280}px"><canvas id="inv-canvas" role="img" aria-label="Stock value"></canvas></div>`;
+    return `<section class="card rep-chart-card"><div class="rep-card-head"><div><h3>${view === "items" ? "Most valuable items" : "Stock value by category"}</h3><p class="rep-card-sub">${view === "items" ? "Current stock value of your top items" : "Share of current stock value"}</p></div><div class="rep-seg" role="group" aria-label="Chart view">${seg}</div></div>${body}</section>`;
+  }
+  function drawInvChart() {
+    if (invChart) { invChart.destroy(); invChart = null; }
+    const cv = $("#inv-canvas");
+    if (!cv || typeof Chart === "undefined") return;
+    const view = invView(), rows = invChartRows(view), t = repTheme();
+    if (view === "category") { invChart = buildDonut({ format: "money" }, rows, cv, t); return; }
+    invChart = new Chart(cv, {
+      type: "bar",
+      data: { labels: rows.map((r) => r.label), datasets: [{ label: "Value", data: rows.map((r) => r.value), backgroundColor: hexA(t.green, 0.85), borderRadius: 4, maxBarThickness: 28 }] },
+      options: {
+        indexAxis: "y", responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => " " + fmtMoney(c.parsed.x) } } },
+        scales: { x: { beginAtZero: true, grid: { color: t.line }, border: { display: false }, ticks: { color: t.muted, callback: repCompact } }, y: { grid: { display: false }, ticks: { color: t.text } } }
+      }
+    });
+  }
+
   function exportInventory() {
     const rows = inventoryShown();
     if (!rows.length) { toast("There are no items to export."); return; }
     const csvMoney = (i, v) => (i.is_stock_tracked && v != null ? Number(v).toFixed(2) : "");
     downloadCSV("inventory", [
-      ["Name", "Category", "Base unit", "Stock tracked", "Current stock", "Average cost", "Total value", "Last updated"],
-      ...rows.map((i) => [i.name, categoryLabel(i.category), invUnitName(i), i.is_stock_tracked ? "Yes" : "No",
+      ["Name", "Category", "Base unit", "Stock tracked", "Status", "Current stock", "Average cost", "Total value", "Last updated"],
+      ...rows.map((i) => [i.name, categoryLabel(i.category), invUnitName(i), i.is_stock_tracked ? "Yes" : "No", invStatus(i)[1],
         i.is_stock_tracked && i.current_stock != null ? fmtQty(i.current_stock) : "",
         csvMoney(i, i.current_average_cost), csvMoney(i, i.total_stock_value), fmtStamp(i.updated_at)]),
     ]);
@@ -112,42 +192,30 @@
 
   function inventoryView() {
     const inv = state.inventory;
+    if (invChart) { invChart.destroy(); invChart = null; }   // the old canvas is about to be replaced
     const head = `<div class="page-head"><div><h1>Inventory</h1><p>Items you buy, produce and sell, and the units they come in.</p></div><button class="btn" data-action="add-item">${icon("plus", 14)}Add Item</button></div>`;
     if (inv.status === "idle" || inv.status === "loading") return head + loadingView();
     if (inv.status === "error") return head + `<div class="state-card err" role="alert">${icon("alert", 28)}<h2>Something went wrong</h2><p>We couldn't load your inventory.</p><button class="btn pill" data-action="retry-inventory">Try again</button></div>`;
     if (!inv.items.length) {
       return head + `<div class="state-card">${icon("inventory", 28)}<h2>No items yet</h2><p>Add items such as Fresh Eggs, Layer Feed or Spent Hens, then set their unit conversions.</p><button class="btn" data-action="add-item">${icon("plus", 14)}Add Item</button></div>`;
     }
-    // const q = state.query.trim().toLowerCase();
-    // const shown = q ? inv.items.filter((i) => `${i.name} ${categoryLabel(i.category)} ${i.base_unit_name}`.toLowerCase().includes(q)) : inv.items;
-    // const unitName = (i) => i.base_unit_name || (inv.units.find((u) => String(u.id) === String(i.base_unit)) || {}).name || "—";
-    // const btn = (action, id, label) => `<button class="btn ghost" type="button" style="padding:4px 10px;font-size:12px" data-action="${action}" data-id="${esc(id)}">${label}</button>`;
-    // const rows = shown.map((i) => {
-    //   // Only items that track stock have a stock figure. The server may not send one yet, so show a dash then.
-    //   const stockVal = i.is_stock_tracked && i.current_stock != null ? fmtQty(i.current_stock) : "—";
-    //   return `<tr>
-    //   <td class="item-name">${esc(i.name)}</td><td><span class="chip cat-${esc(String(i.category).toLowerCase())}">${esc(categoryLabel(i.category))}</span></td><td>${esc(unitName(i))}</td><td><span class="pill ${i.is_stock_tracked ? "on" : "off"}">${i.is_stock_tracked ? "Yes" : "No"}</span></td>      <td class="num">${esc(stockVal)}</td>
-    //   <td class="num"><span style="display:inline-flex;gap:6px;align-items:center">${btn("edit-item", i.id, "Edit")}${btn("archive-item", i.id, "Archive")}${btn("manage-conversions", i.id, "Conversions")}${btn("stock-history", i.id, "History")}</span></td></tr>`;
-    // }).join("");
-    //   return head + inventoryStats(inv.items) + `<section class="card table-card">
-    //   <div class="table-head"><h3>Items</h3></div>
-    //   ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Base unit</th><th>Stock tracked</th><th class="num">Current Stock</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">No items match "${esc(state.query)}".</div>`}
-    // </section>`;
-
-
-
-     const shown = inventoryShown();
+    const shown = inventoryShown();
     const menuItem = (action, id, ic, label, cls) => `<button type="button" role="menuitem"${cls ? ` class="${cls}"` : ""} data-action="${action}" data-id="${esc(id)}">${icon(ic, 15)}${label}</button>`;
     const rows = shown.map((i) => {
-      // Only items that track stock have a stock figure. The server may not send one yet, so show a dash then.
-      const stockVal = i.is_stock_tracked && i.current_stock != null ? fmtQty(i.current_stock) : "—";
       const mid = `inv-menu-${i.id}`;
+      const [stCls, stLabel] = invStatus(i);
+      // A tracked item shows its stock with the unit (plus the packaging hint). An untracked one has no stock,
+      // cost or value, so one note spans those three columns instead of three dashes.
+      const unit = invUnitName(i), pack = invPack(i), unitTxt = unit && unit !== "—" ? ` <span style="color:var(--muted)">${esc(unit)}</span>` : "";
+      const stockCell = i.current_stock != null ? `${esc(fmtQty(i.current_stock))}${unitTxt}${pack ? `<div style="font-size:11px;color:var(--muted)">${esc(pack)}</div>` : ""}` : invDash;
+      const money = (v) => (v != null ? esc(fmtMoney(v)) : invDash);
+      const middle = i.is_stock_tracked
+        ? `<td class="num">${stockCell}</td><td class="num">${money(i.current_average_cost)}</td><td class="num">${money(i.total_stock_value)}</td>`
+        : `<td colspan="3" style="color:var(--muted)">Stock isn't tracked for this item${unit && unit !== "—" ? " (base unit: " + esc(unit) + ")" : ""}</td>`;
       return `<tr>
-      <td class="item-name">${esc(i.name)}</td><td><span class="cat-chip cat-${esc(String(i.category).toLowerCase())}">${esc(categoryLabel(i.category))}</span></td><td>${esc(invUnitName(i))}</td><td><span class="stock-pill ${i.is_stock_tracked ? "on" : "off"}">${i.is_stock_tracked ? "Yes" : "No"}</span></td>
-      <td class="num">${esc(stockVal)}</td>
-      <td class="num">${esc(invMoney(i, i.current_average_cost))}</td>
-      <td class="num">${esc(invMoney(i, i.total_stock_value))}</td>
-      <td>${esc(fmtStamp(i.updated_at))}</td>
+      <td class="item-name">${esc(i.name)}</td><td><span class="cat-chip cat-${esc(String(i.category).toLowerCase())}">${esc(categoryLabel(i.category))}</span></td><td><span class="stock-pill ${stCls}">${esc(stLabel)}</span></td>
+      ${middle}
+      <td>${i.updated_at ? esc(fmtStamp(i.updated_at)) : invDash}</td>
       <td class="num"><div class="menu-wrap" style="display:inline-block"><button class="icon-btn square row-btn" type="button" data-menu="${mid}" data-fixed aria-haspopup="true" aria-label="Actions for ${esc(i.name)}">${icon("more", 16)}</button>
         <div class="menu tbl-menu" id="${mid}" role="menu" hidden>${menuItem("edit-item", i.id, "edit", "Edit")}${menuItem("manage-conversions", i.id, "convert", "Conversions")}${menuItem("stock-history", i.id, "history", "History")}${menuItem("archive-item", i.id, "archive", "Archive", "danger")}</div></div></td></tr>`;
     }).join("");
@@ -160,9 +228,10 @@
       <button class="tool-btn" type="button" data-action="export-inventory" aria-label="Download as CSV">${icon("download", 16)}</button>
     </div>`;
     const empty = state.query.trim() ? `No items match "${esc(state.query)}".` : "No items match these filters.";
-    return head + inventoryStats(inv.items) + `<section class="card table-card inv-table">
-      <div class="table-head"><div><h3>Inventory items</h3><p class="sub-line">Showing the latest records for ${esc((farm() || {}).name || "your farm")}</p></div>${tools}</div>
-      ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Base unit</th><th>Stock tracked</th><th class="num">Current Stock</th><th class="num">Avg Cost</th><th class="num">Total Value</th><th>Last updated</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">${empty}</div>`}
+    queueMicrotask(drawInvChart);   // runs right after renderView has put the HTML on the page
+    return head + inventoryStats(inv.items) + invChartCard() + `<section class="card table-card inv-table">
+      <div class="table-head"><div><h3>Inventory items</h3><p class="sub-line">Showing ${fmtInt(shown.length)} of ${fmtInt(inv.items.length)} items</p></div>${tools}</div>
+      ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Status</th><th class="num">Current Stock</th><th class="num">Avg Cost</th><th class="num">Total Value</th><th>Last updated</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">${empty}</div>`}
     </section>`;
   }
 

@@ -575,3 +575,9 @@
   .rep-seg { width: 100%; }
   .rep-seg button { flex: 1; }
 }
+/* ---------- Inventory: five summary cards, red "out of stock" pill ---------- */
+.stats.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .stats.five { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .stats.five { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 440px) { .stats.five { grid-template-columns: minmax(0, 1fr); } }
+.stock-pill.out { color: var(--error); background: color-mix(in srgb, var(--error) 12%, transparent); }

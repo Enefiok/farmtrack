@@ -27,7 +27,8 @@
        title, subtitle, icon, tableTitle, emptyTable, emptyChart
        dateRangeAffects : "cards+chart" | "chart-only" | "none"   ("none" hides the Date range control)
        filter           : { field, label, all, kind: "flock" | "distinct" }  (frontend-only dropdown)
-       sigKeys          : numeric UI-row fields summed into the auto-refresh signature
+       sigKeys          : UI-row fields (numbers or text) fingerprinted into the auto-refresh signature; a change to any
+                          of them (stage, status, quantity...) refetches the stats
        rows             : optional () => rows (default state.data[type])
        ownsTable        : true when the page draws its own table (Inventory)
        cards            : [{ label, summaryKey, trendKey?, format, inverse?, warn?, caption?, note?(summary) }]
@@ -75,7 +76,7 @@
       emptyTable: "No production records yet.",
       dateRangeAffects: "cards+chart",
       filter: { field: "flock", label: "Flock", all: "All flocks", kind: "flock" },
-      sigKeys: ["collected", "damaged"],
+      sigKeys: ["flock", "item", "collected", "damaged", "unit_collected", "unit_damaged"],
       cards: [
         { label: "Eggs collected", summaryKey: "eggs_collected", trendKey: "collected", format: "int" },
         { label: "Damaged eggs", summaryKey: "eggs_damaged", trendKey: "damaged", format: "int", inverse: true },
@@ -103,7 +104,7 @@
       emptyTable: "No sales records yet.",
       dateRangeAffects: "cards+chart",
       filter: { field: "customer", label: "Customer", all: "All customers", kind: "distinct" },
-      sigKeys: ["total", "amount_paid"],
+      sigKeys: ["customer", "product", "quantity", "unit", "total", "amount_paid"],
       cards: [
         { label: "Total Revenue", summaryKey: "total_revenue", trendKey: "revenue", format: "money" },
         { label: "Amount Paid", summaryKey: "amount_paid", trendKey: "paid", format: "money" },
@@ -129,7 +130,7 @@
       emptyTable: "No purchase records yet.",
       dateRangeAffects: "cards+chart",
       filter: { field: "supplier", label: "Supplier", all: "All suppliers", kind: "distinct" },
-      sigKeys: ["total_cost", "amount_paid"],
+      sigKeys: ["supplier", "item", "quantity", "unit", "total_cost", "amount_paid"],
       cards: [
         { label: "Total Spend", summaryKey: "total_amount", trendKey: "amount", format: "money" },
         { label: "Paid", summaryKey: "amount_paid", trendKey: "paid", format: "money" },
@@ -156,7 +157,7 @@
       emptyTable: "No expense records yet.",
       dateRangeAffects: "cards+chart",
       filter: { field: "category", label: "Category", all: "All categories", kind: "distinct" },
-      sigKeys: ["amount", "amount_paid"],
+      sigKeys: ["supplier", "category", "amount", "amount_paid"],
       cards: [
         { label: "Total", summaryKey: "total_amount", trendKey: "amount", format: "money" },
         { label: "Paid", summaryKey: "amount_paid", trendKey: "paid", format: "money" },
@@ -182,7 +183,7 @@
       emptyTable: "No farm activities yet.",
       dateRangeAffects: "cards+chart",
       filter: { field: "flock", label: "Flock", all: "All flocks", kind: "flock" },
-      sigKeys: [],   // the row count is always part of the signature, and that is the number that matters here
+      sigKeys: ["code", "flock", "item", "quantity", "unit"],   // what the cards and charts are built from (type, flock, item, quantity)
       // "Activity type" dropdown. Values are the backend's activity_type codes (they match each row's `code`).
       typeFilter: {
         label: "Activity type", all: "All activities",
@@ -226,7 +227,7 @@
       emptyChart: "No flocks recorded yet.",
       dateRangeAffects: "none",
       filter: null,
-      sigKeys: ["current_count", "mortality_rate"],
+      sigKeys: ["identifier", "stage", "status", "starting_count", "current_count", "mortality_rate"],
       cards: [
         { label: "Active Flocks", summaryKey: "active_flocks", format: "int", caption: "Currently active" },
         { label: "Total Birds", summaryKey: "total_birds", format: "int", caption: "Across all flocks" },
@@ -370,7 +371,7 @@
     farmId: null, sig: "", seq: 0
   });
   const REP_PAGE = 10;
-  const REP_PRESETS = [["7d", "Last 7 days"], ["30d", "Last 30 days"], ["90d", "Last 90 days"], ["year", "This year"], ["custom", "Custom"]];
+  const REP_PRESETS = [["today", "Today"], ["7d", "Last 7 days"], ["30d", "Last 30 days"], ["90d", "Last 90 days"], ["month", "This month"], ["lastmonth", "Last month"], ["year", "This year"], ["all", "All time"], ["custom", "Custom"]];
   let repChart = null;
 
   const repCfg = (type) => TAB_REPORT_CONFIG[type];
@@ -405,11 +406,16 @@
   };
 
   // A signature of the rows, so a new or adjusted record triggers a fresh fetch of the stats.
-  // The fields summed come from the tab's config (sigKeys).
+  // Every row contributes its id, date and the fields listed in the tab's sigKeys (numbers AND text), so changing a
+  // flock's stage or status, or an activity's quantity, changes the signature even when the row count does not.
   function repSig(type) {
-    const cfg = repCfg(type), rows = repData(type);
-    const sums = (cfg.sigKeys || []).map((k) => rows.reduce((t, r) => t + num(r[k]), 0));
-    return [rows.length].concat(sums).join("|");
+    const keys = repCfg(type).sigKeys || [], rows = repData(type);
+    let h = 5381;
+    rows.forEach((r) => {
+      const str = String(r.id) + "|" + String(r.date || "") + "|" + keys.map((k) => String(r[k] == null ? "" : r[k])).join("|") + ";";
+      for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
+    });
+    return rows.length + "|" + h;
   }
 
   // Switching farms starts the report from scratch.
@@ -417,20 +423,33 @@
     if (s.farmId !== state.farmId) Object.assign(s, { farmId: state.farmId, filter: "", activityType: "", page: 0, data: null, error: null, status: "idle", sig: "" });
   }
 
-  // The dates the table is limited to. Same rule as the backend: from (today - days) to today.
+  // The dates a preset covers, as ISO strings. Same rules as the dashboard (periodRange in dashboard/metrics.js):
+  // "Last N days" is exactly N days counting today, so Last 7 days = today and the 6 days before it.
+  // "All time" has no dates. Both the table filter and the backend request use this one function.
   function repBounds(s) {
-    if (s.preset === "custom") return { from: s.from || "", to: s.to || "" };
-    const end = new Date();
-    if (s.preset === "year") return { from: localISO(new Date(end.getFullYear(), 0, 1)), to: localISO(end) };
-    const start = new Date(end);
-    start.setDate(start.getDate() - (parseInt(s.preset, 10) || 30));
-    return { from: localISO(start), to: localISO(end) };
+    const P = s.preset;
+    if (P === "custom") return { from: s.from || "", to: s.to || "" };
+    if (P === "all") return { from: "", to: "" };
+    const now = new Date(), y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+    let from = new Date(y, m, d), to = new Date(y, m, d);
+    if (P === "month") from = new Date(y, m, 1);
+    else if (P === "lastmonth") { from = new Date(y, m - 1, 1); to = new Date(y, m, 0); }
+    else if (P === "year") from = new Date(y, 0, 1);
+    else if (P !== "today") from = new Date(y, m, d - ((parseInt(P, 10) || 30) - 1));
+    return { from: localISO(from), to: localISO(to) };
   }
-  // The date range, plus activity_type when a type is picked (the API only sends it to stats and trend).
-  const repRange = (s) => {
-    const r = s.preset === "custom" ? { start_date: s.from, end_date: s.to } : AgroAPI.dateRange(s.preset);
+  // What is sent to the backend: always explicit start and end dates, so the backend never applies its own "days" rule.
+  // "All time" starts at the tab's oldest record (or today when there are none), so the chart is not stretched over empty years.
+  // Farm Activities also sends activity_type (the API only passes it to stats and trend).
+  function repRange(type, s) {
+    let b = repBounds(s);
+    if (s.preset === "all") {
+      const dates = repData(type).map((r) => String(r.date || "")).filter(Boolean).sort();
+      b = { from: dates[0] || localISO(new Date()), to: localISO(new Date()) };
+    }
+    const r = { start_date: b.from, end_date: b.to };
     return s.activityType ? Object.assign({}, r, { activity_type: s.activityType }) : r;
-  };
+  }
 
   /* ---------- fetching (backend-driven part) ---------- */
   async function loadReport(type) {
@@ -441,7 +460,7 @@
     s.status = s.data ? "refreshing" : "loading";
     paintReport(type);
     try {
-      const rep = await AgroAPI.getRecordsReport(state.farmId, type, repRange(s));
+      const rep = await AgroAPI.getRecordsReport(state.farmId, type, repRange(type, s));
       if (seq !== s.seq || s.farmId !== state.farmId) return; // a newer request or another farm took over
       const keys = repViews(cfg).map(repSrcKey);
       s.data = rep;
@@ -517,7 +536,7 @@
           <div class="rep-search">${icon("search", 16)}<input class="rep-input" type="search" id="rep-search" placeholder="Search records..." autocomplete="off" value="${esc(state.query)}"></div>
         </div>`;
     const applyHTML = dated ? `<button class="btn" type="button" data-action="rep-apply"${repBusy(s) ? " disabled" : ""}>${icon("filter", 14)}Apply filters</button>` : "";
-    const exportHTML = cfg.ownsTable ? "" : `<button class="btn ghost" type="button" data-action="export-records" data-type="${type}">${icon("download", 14)}Export</button>`;
+    const exportHTML = cfg.ownsTable ? "" : `<button class="btn ghost" type="button" data-action="export-records" data-type="${type}" title="Download the records matching your filters">${icon("download", 14)}Export</button>`;
     return `<section class="card rep-filters" aria-label="Filters">
         ${dateHTML}${filterHTML}${typeHTML}${searchHTML}
         <div class="rep-actions">${applyHTML}${exportHTML}</div>
@@ -638,7 +657,8 @@
   function repGuardMsg(v, rows) {
     if (v.guard === "series") {
       const hasValue = rows.some((p) => (v.seriesKeys || []).some((k) => Number(p[k]) > 0));
-      return rows.length < 3 || !hasValue ? "Not enough data in this period yet." : "";
+      // One or two points are enough to draw (a new farm, or records on only a day or two). Only an empty or all-zero series is skipped.
+      return !rows.length || !hasValue ? "No data in this period yet." : "";
     }
     if (v.guard === "breakdown") {
       const live = rows.filter((r) => Number(r.value) > 0).length;
@@ -761,12 +781,13 @@
       return {
         type: "line", label: v.labels[i], data, borderColor: c, backgroundColor: kind === "area" ? hexA(c, 0.15) : c,
         borderWidth: 2.5, tension: 0.4, fill: kind === "area",
-        pointRadius: rows.length > 45 ? 0 : 3, pointHoverRadius: 5, pointBackgroundColor: c, order: 1
+        pointRadius: rows.length > 45 ? 0 : (rows.length < 3 ? 5 : 3), pointHoverRadius: 5, pointBackgroundColor: c, order: 1
       };
     });
     const hasBar = datasets.some((d) => d.type === "bar");
     // Counts start at zero unless the view explicitly opts out (Production's saleable trend keeps its tighter baseline).
-    const zero = v.beginAtZero != null ? v.beginAtZero : (!!v.ints || v.type !== "line");
+    let zero = v.beginAtZero != null ? v.beginAtZero : (!!v.ints || v.type !== "line");
+    if (rows.length < 3) zero = true;   // with 1-2 points a tight baseline would make the line meaningless
     const peak = rows.reduce((m, p) => {
       const vals = v.seriesKeys.map((k) => Number(p[k]) || 0);
       return Math.max(m, stacked ? vals.reduce((a, b) => a + b, 0) : Math.max.apply(null, vals));
