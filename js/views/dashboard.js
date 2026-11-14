@@ -108,16 +108,18 @@ function dashboardView() {
 
   return `
       <div class="page-head">
-      <div><h1>${greet}!</h1><p>Here's what's happening at ${esc(farm().name)} today.</p>
-      <div class="sel period-sel">${icon("calendar", 15)}<select id="dash-period" aria-label="Dashboard period">${DASH_PERIODS.map(([k, l]) => `<option value="${k}"${dashPeriod()[0] === k ? " selected" : ""}>${l}</option>`).join("")}</select>${icon("chevronDown", 16)}</div></div>
-      <button class="btn" data-action="export-dashboard">${icon("upload", 16)}Export</button>
+      <div><h1>${greet}!</h1><p>Here's what's happening at ${esc(farm().name)} today.</p></div>
+      <div class="page-head-actions">
+        <div class="sel period-sel">${icon("calendar", 15)}<select id="dash-period" aria-label="Dashboard period">${DASH_PERIODS.map(([k, l]) => `<option value="${k}"${dashPeriod()[0] === k ? " selected" : ""}>${l}</option>`).join("")}</select>${icon("chevronDown", 16)}</div>
+        <button class="btn" data-action="export-dashboard">${icon("upload", 16)}Export</button>
+      </div>
       </div>
 
       ${showSetupCard() ? setupCard() : ""}
 
       <div class="stats">
         ${statCard("bird", "Live birds", fmtInt(m.live), null)}
-        ${hasEggs() ? statCard("egg", `Eggs collected (${per})`, fmtInt(m.eggsToday), m.eggsDelta, "From previous period") : statCard("bird", "Active flocks", fmtInt(state.data.flock.filter((f) => f.status === "Active").length), null)}   ${statCard("wallet", "Stock Value", fmtMoney0(m.buyAll), m.buyDelta, "From last month")}
+        ${hasEggs() ? statCard("egg", `Eggs collected (${per})`, fmtInt(m.eggsToday), m.eggsDelta, "From previous period") : statCard("bird", "Active flocks", fmtInt(state.data.flock.filter((f) => f.status === "Active").length), null)} ${statCard("wallet", "Stock Value", m.stockValue == null ? "—" : fmtMoney0(m.stockValue), null)}
         ${statCard("trend", `Sales (${per})`, fmtMoney0(m.sellM), m.sellDelta, "From previous period")}
       </div>
 
@@ -155,9 +157,9 @@ function dashboardView() {
 
         <section class="card recent area-recent">
         <div class="card-head"><h3>Recent Activity</h3></div>
-          <p class="sub">Latest records from your team</p>
-          ${acts.length ? acts.map((a) => `...`).join("") : `<div class="empty-line">No activity yet. Records you add will show up here.</div>`}
-          ${allActs.length ? `<div class="pager"><span>${actPage * ACT_PAGE + 1}–${Math.min(allActs.length, (actPage + 1) * ACT_PAGE)} of ${fmtInt(allActs.length)}</span><div class="pager-btns"><button class="tool-btn" type="button" data-action="act-prev"${actPage === 0 ? " disabled" : ""}>Previous</button><button class="tool-btn" type="button" data-action="act-next"${actPage >= actPages - 1 ? " disabled" : ""}>Next</button></div></div>` : ""}
+        <p class="sub">Latest records from your team</p>
+         ${acts.length ? acts.map((a) => `<div class="act">${icon(a.ic, 18)}<div class="txt"><b>${esc(a.t)}</b><small>${esc(a.s)}</small></div><time>${a.at ? esc(fmtWhen(a.at)) : ""}</time></div>`).join("") : `<div class="empty-line">No activity yet. Records you add will show up here.</div>`}
+         ${allActs.length ? `<div class="pager"><span>${actPage * ACT_PAGE + 1}–${Math.min(allActs.length, (actPage + 1) * ACT_PAGE)} of ${fmtInt(allActs.length)}</span><div class="pager-btns"><button class="tool-btn" type="button" data-action="act-prev"${actPage === 0 ? " disabled" : ""}>Previous</button><button class="tool-btn" type="button" data-action="act-next"${actPage >= actPages - 1 ? " disabled" : ""}>Next</button></div></div>` : ""}
         </section>
       </div>`;
 }

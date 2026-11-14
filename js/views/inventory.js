@@ -32,7 +32,7 @@
       if (silent && state.inventory.status === "ready") return;
       state.inventory.status = "error";
     }
-    if (route().page === "inventory" && state.status === "ready") renderView();
+        if ((route().page === "inventory" || route().page === "dashboard") && state.status === "ready") renderView();
   }
 
   // The farm-wide item list that feeds the Sales, Purchase and Sell Birds forms comes from lookups, so refresh it too.

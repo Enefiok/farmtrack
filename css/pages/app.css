@@ -223,7 +223,11 @@
 
     /* ---------- Records ---------- */
     .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
-    .toolbar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    /* Keep the action buttons on one row at any zoom level; the tabs scroll instead */
+    .toolbar > .tabs { min-width: 0; }
+    .toolbar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; flex: none; }
+    .toolbar-actions .btn { flex: none; white-space: nowrap; }
+    
     .tabs { display: inline-flex; gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: 12px; overflow-x: auto; max-width: 100%; background: var(--card); }
     .tab { flex: none; padding: 9px 20px; border: 0; border-radius: 8px; background: none; font-size: 14px; white-space: nowrap; }
     .tab:hover { background: var(--green-tint); }
@@ -322,7 +326,13 @@
       .backdrop { padding: 12px; }
       .control input, .control select, .control textarea { font-size: 16px; }
       .toolbar { flex-direction: column; align-items: stretch; }
+      .toolbar-actions { width: 100%; }
+      .toolbar-actions .btn { flex: 1 1 0; min-width: 0; padding: 0 10px; }
       .page-head h1 { font-size: 20px; }
+      .page-head { flex-wrap: wrap; }
+      .page-head-actions { width: 100%; }
+      .page-head-actions .sel { flex: 1 1 auto; }
+      .page-head-actions .sel select { width: 100%; }
       .setup-card { flex-direction: column; align-items: flex-start; }
       .setup-actions { justify-content: flex-start; }
     }
@@ -467,7 +477,10 @@
     .table-card .pager { margin: 0; padding: 14px 20px; }
 
     /* Dashboard period dropdown (calendar icon on the left, chevron on the right) */
-    .period-sel { margin-top: 14px; display: inline-block; }
+    .period-sel { display: inline-block; }
+    /* Period filter and Export sit side by side on the right of the dashboard header */
+    .page-head-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+    .page-head-actions .btn { white-space: nowrap; }
     .period-sel select { padding-left: 36px; }
     .period-sel > svg.i:first-child { left: 12px; right: auto; color: var(--muted); }
 

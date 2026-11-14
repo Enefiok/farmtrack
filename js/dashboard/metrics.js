@@ -58,17 +58,24 @@
     const sell = sumBy(d.sales, "total", within(p.from, p.to));
     const sellPrev = p.from ? sumBy(d.sales, "total", within(p.prevFrom, p.prevTo)) : 0;
     // Stock Value is a running total, so it does not depend on the period.
-    const buyAll = sumBy(d.purchase, "total_cost");
-    const buyM = sumBy(d.purchase, "total_cost", inMonth(ym)), buyP = sumBy(d.purchase, "total_cost", inMonth(pm));
-    // The laying target is per day, so it grows with the number of days in the period.
+       const buyAll = sumBy(d.purchase, "total_cost");
+    // The running total as it stood at the end of last month, so the badge compares like with like.
+    const lastMonthEnd = localISO(new Date(now.getFullYear(), now.getMonth(), 0));
+    const buyPrev = sumBy(d.purchase, "total_cost", (r) => (r.date || "") <= lastMonthEnd);
+        // Stock Value = what the inventory is worth now (valuation calculated by the backend).
+    // null while inventory is still loading or the server sends no valuation.
+    const valued = (state.inventory && state.inventory.status === "ready" ? state.inventory.items : [])
+      .filter((i) => i.is_stock_tracked && i.is_active !== false && i.total_stock_value != null);
+    const stockValue = valued.length ? valued.reduce((s, i) => s + num(i.total_stock_value), 0) : null;
+     // The laying target is per day, so it grows with the number of days in the period.
     let days = p.days;
     if (!days) {
       const first = d.production.map((r) => r.date).filter(Boolean).sort()[0];
       days = first ? Math.max(1, Math.round((new Date(localISO(now)) - new Date(first)) / 86400000) + 1) : 1;
     }
     const target = (state.settings.dailyEggTarget || live) * days;
-    return { live, eggsToday: eggs, target, buyAll, sellM: sell, days,
-      eggsDelta: pct(eggs, eggsPrev), buyDelta: pct(buyM, buyP), sellDelta: pct(sell, sellPrev) };
+    return { live, eggsToday: eggs, target, buyAll, stockValue, sellM: sell, days,
+    eggsDelta: pct(eggs, eggsPrev), buyDelta: pct(buyAll, buyPrev), sellDelta: pct(sell, sellPrev) };
   }
 
   function monthly() {

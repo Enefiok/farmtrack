@@ -176,7 +176,7 @@
     // Opening a Records tab pulls fresh rows for that tab from the server
     const { page, sub } = route();
     // Opening Inventory shows what we have and quietly re-fetches the item list
-    if (page === "inventory" && state.status === "ready" && state.inventory.status === "ready") loadInventory(true);
+       if ((page === "inventory" || page === "dashboard") && state.status === "ready" && state.inventory.status === "ready") loadInventory(true);
     if (page === "records" && state.status === "ready" && !DEV) {
       const type = pickTab(sub);
       api.refresh(type)

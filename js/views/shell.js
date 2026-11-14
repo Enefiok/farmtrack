@@ -62,6 +62,8 @@
     if (params.has("restricted") && page === "dashboard") { view.innerHTML = restrictedView(); return; } // preview of the design
     if (page === "users" && !canManageUsers()) { view.innerHTML = restrictedView(); return; }
     if (page === "dashboard") {
+      if (state.inventory.farmId !== state.farmId) state.inventory = { items: [], units: [], status: "idle", farmId: state.farmId };
+      if (state.inventory.status === "idle") loadInventory();
       view.innerHTML = dashboardView();
       bindChart();
     } else if (page === "records") {
