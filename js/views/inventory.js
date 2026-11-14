@@ -33,7 +33,6 @@
       state.inventory.status = "error";
     }
     if ((route().page === "inventory" || route().page === "dashboard") && state.status === "ready") renderView();
-    if (state.inventory.status === "ready") loadInvConversions();   // quietly, for the packaging hint in the stock column
   }
 
   // The farm-wide item list that feeds the Sales, Purchase and Sell Birds forms comes from lookups, so refresh it too.
@@ -41,7 +40,6 @@
     // The Unit dropdown on the forms caches each item's units. Items or conversions just changed, so drop that cache.
     // (clearUnitCache lives in forms.js; the typeof check keeps this working until that file is updated.)
     if (typeof clearUnitCache === "function") clearUnitCache();
-    state.inventory.conv = {};   // conversions or items changed: the packaging hints are fetched again
     if (DEV) {
       state.lookups.items = state.inventory.items.map((i) => ({ id: i.id, name: i.name, category: i.category, base_unit_name: i.base_unit_name }));
       return;
@@ -100,43 +98,10 @@
       : stk === "out" ? i.is_stock_tracked && i.current_stock != null && i.current_stock <= 0
       : stk === "untracked" ? !i.is_stock_tracked : true;
     return state.inventory.items.filter((i) =>
-      (!q || `${i.name} ${categoryLabel(i.category)} ${i.base_unit_name}`.toLowerCase().includes(q)) &&
+      (!q || `${i.name} ${categoryLabel(i.category)} ${invUnitName(i)}`.toLowerCase().includes(q)) &&
       (!cat || String(i.category).toUpperCase() === cat) && stockOk(i));
   }
 
-  /* ---------- Stock with its unit, packaging hint and status ---------- */
-  // Conversions per item, fetched quietly after the list loads so a stock figure can also be shown as, for
-  // example, "≈ 33.3 Crate". Keyed by farm + item; cleared whenever conversions or items change (refreshLookups).
-  const invConvKey = (id) => state.farmId + ":" + id;
-  let invConvSeq = 0;
-  async function loadInvConversions() {
-    const inv = state.inventory, farmId = state.farmId, seq = ++invConvSeq;
-    inv.conv = inv.conv || {};
-    const need = inv.items.filter((i) => i.is_stock_tracked && num(i.current_stock) > 0 && !(invConvKey(i.id) in inv.conv));
-    if (!need.length) return;
-    for (let k = 0; k < need.length; k += 4) {
-      await Promise.all(need.slice(k, k + 4).map(async (i) => {
-        try { inv.conv[invConvKey(i.id)] = DEV ? ((inv.devConv || {})[`dev-conv-${i.id}`] || []) : await AgroAPI.listConversions(farmId, i.id); }
-        catch { inv.conv[invConvKey(i.id)] = []; }   // no hint for this item; not retried until the cache is cleared
-      }));
-      if (farmId !== state.farmId || seq !== invConvSeq) return;
-    }
-    if (route().page === "inventory" && state.status === "ready") renderView();
-  }
-  // The stock written in the item's biggest unit that still gives at least 1 (a unit with factor 1 or less is skipped).
-  function invPack(i) {
-    const list = (state.inventory.conv || {})[invConvKey(i.id)], stock = num(i.current_stock);
-    if (!list || !(stock > 0)) return "";
-    let best = null;
-    list.forEach((c) => { const f = num(c.factor); if (f > 1 && !c.is_base_unit && stock / f >= 1 && (!best || f > best.f)) best = { f, name: c.unit_name }; });
-    return best ? `≈ ${fmtQty(stock / best.f)} ${best.name}` : "";
-  }
-  // [css class, label] for the Status column.
-  function invStatus(i) {
-    if (!i.is_stock_tracked) return ["off", "Not tracked"];
-    if (i.current_stock == null) return ["off", "Unknown"];
-    return i.current_stock > 0 ? ["on", "In stock"] : ["out", "Out of stock"];
-  }
   const invDash = `<span style="color:var(--muted)">—</span>`;
 
   /* ---------- Stock value chart (built from the loaded items, so it needs no extra request) ---------- */
@@ -183,8 +148,8 @@
     if (!rows.length) { toast("There are no items to export."); return; }
     const csvMoney = (i, v) => (i.is_stock_tracked && v != null ? Number(v).toFixed(2) : "");
     downloadCSV("inventory", [
-      ["Name", "Category", "Base unit", "Stock tracked", "Status", "Current stock", "Average cost", "Total value", "Last updated"],
-      ...rows.map((i) => [i.name, categoryLabel(i.category), invUnitName(i), i.is_stock_tracked ? "Yes" : "No", invStatus(i)[1],
+      ["Name", "Category", "Base unit", "Track stock", "Current stock", "Average cost", "Total value", "Last updated"],
+      ...rows.map((i) => [i.name, categoryLabel(i.category), invUnitName(i), i.is_stock_tracked ? "Yes" : "No",
         i.is_stock_tracked && i.current_stock != null ? fmtQty(i.current_stock) : "",
         csvMoney(i, i.current_average_cost), csvMoney(i, i.total_stock_value), fmtStamp(i.updated_at)]),
     ]);
@@ -199,21 +164,34 @@
     if (!inv.items.length) {
       return head + `<div class="state-card">${icon("inventory", 28)}<h2>No items yet</h2><p>Add items such as Fresh Eggs, Layer Feed or Spent Hens, then set their unit conversions.</p><button class="btn" data-action="add-item">${icon("plus", 14)}Add Item</button></div>`;
     }
+    queueMicrotask(drawInvChart);   // runs right after renderView has put the HTML on the page
+    return head + inventoryStats(inv.items) + invChartCard() + invTableHTML();
+  }
+
+  // Search, the Category select and the Filter menu only change the table, so only the table is repainted
+  // (the cards and the chart do not depend on them, and redrawing the chart on every key would replay its animation).
+  function paintInvTable() {
+    const el = $("#inv-table");
+    if (el) el.outerHTML = invTableHTML(); else renderView();
+  }
+
+  function invTableHTML() {
+    const inv = state.inventory;
     const shown = inventoryShown();
     const menuItem = (action, id, ic, label, cls) => `<button type="button" role="menuitem"${cls ? ` class="${cls}"` : ""} data-action="${action}" data-id="${esc(id)}">${icon(ic, 15)}${label}</button>`;
     const rows = shown.map((i) => {
       const mid = `inv-menu-${i.id}`;
-      const [stCls, stLabel] = invStatus(i);
-      // A tracked item shows its stock with the unit (plus the packaging hint). An untracked one has no stock,
-      // cost or value, so one note spans those three columns instead of three dashes.
-      const unit = invUnitName(i), pack = invPack(i), unitTxt = unit && unit !== "—" ? ` <span style="color:var(--muted)">${esc(unit)}</span>` : "";
-      const stockCell = i.current_stock != null ? `${esc(fmtQty(i.current_stock))}${unitTxt}${pack ? `<div style="font-size:11px;color:var(--muted)">${esc(pack)}</div>` : ""}` : invDash;
+      // Columns follow the Add Item form: Name, Category, Base Unit, "Track stock for this item". An untracked item
+      // has no stock, cost or value, so one note spans those three columns instead of three dashes.
+      const stockCell = i.current_stock != null
+        ? (i.current_stock > 0 ? esc(fmtQty(i.current_stock)) : `<span style="color:var(--error)">${esc(fmtQty(i.current_stock))}</span>`)
+        : invDash;
       const money = (v) => (v != null ? esc(fmtMoney(v)) : invDash);
       const middle = i.is_stock_tracked
         ? `<td class="num">${stockCell}</td><td class="num">${money(i.current_average_cost)}</td><td class="num">${money(i.total_stock_value)}</td>`
-        : `<td colspan="3" style="color:var(--muted)">Stock isn't tracked for this item${unit && unit !== "—" ? " (base unit: " + esc(unit) + ")" : ""}</td>`;
+        : `<td colspan="3" style="color:var(--muted)">Stock isn't tracked for this item</td>`;
       return `<tr>
-      <td class="item-name">${esc(i.name)}</td><td><span class="cat-chip cat-${esc(String(i.category).toLowerCase())}">${esc(categoryLabel(i.category))}</span></td><td><span class="stock-pill ${stCls}">${esc(stLabel)}</span></td>
+      <td class="item-name">${esc(i.name)}</td><td><span class="cat-chip cat-${esc(String(i.category).toLowerCase())}">${esc(categoryLabel(i.category))}</span></td><td>${esc(invUnitName(i))}</td><td><span class="stock-pill ${i.is_stock_tracked ? "on" : "off"}">${i.is_stock_tracked ? "Yes" : "No"}</span></td>
       ${middle}
       <td>${i.updated_at ? esc(fmtStamp(i.updated_at)) : invDash}</td>
       <td class="num"><div class="menu-wrap" style="display:inline-block"><button class="icon-btn square row-btn" type="button" data-menu="${mid}" data-fixed aria-haspopup="true" aria-label="Actions for ${esc(i.name)}">${icon("more", 16)}</button>
@@ -223,15 +201,15 @@
     const cat = state.invCategory || "", stk = state.invStock || "";
     const tools = `<div class="head-tools">
       <div class="sel"><select id="inv-category" aria-label="Filter by category"><option value=""${cat ? "" : " selected"}>All categories</option>${ITEM_CATEGORIES.map(([v, l]) => `<option value="${v}"${cat === v ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>${icon("chevronDown", 16)}</div>
-      <div class="menu-wrap"><button class="tool-btn${stk ? " on" : ""}" type="button" data-menu="inv-filter-menu" data-fixed aria-haspopup="true">${icon("filter", 15)}Filter</button>
+      <div class="menu-wrap"><button class="tool-btn${stk ? " on" : ""}" type="button" data-menu="inv-filter-menu" data-fixed aria-haspopup="true">${icon("filter", 15)}${stk ? "Filter: " + esc((STOCK_FILTERS.find((f) => f[0] === stk) || [0, stk])[1]) : "Filter"}</button>
         <div class="menu tbl-menu" id="inv-filter-menu" role="menu" hidden>${STOCK_FILTERS.map(([v, l]) => `<button type="button" role="menuitem"${stk === v ? ' class="on"' : ""} data-action="inv-stock-filter" data-value="${v}">${l}</button>`).join("")}</div></div>
       <button class="tool-btn" type="button" data-action="export-inventory" aria-label="Download as CSV">${icon("download", 16)}</button>
     </div>`;
-    const empty = state.query.trim() ? `No items match "${esc(state.query)}".` : "No items match these filters.";
-    queueMicrotask(drawInvChart);   // runs right after renderView has put the HTML on the page
-    return head + inventoryStats(inv.items) + invChartCard() + `<section class="card table-card inv-table">
+    const filtered = !!(state.query.trim() || cat || stk);
+    const empty = (state.query.trim() ? `No items match "${esc(state.query)}".` : "No items match these filters.") + (filtered ? ` <button class="btn ghost" type="button" data-action="inv-clear-filters" style="margin-left:8px">Clear filters</button>` : "");
+    return `<section class="card table-card inv-table" id="inv-table">
       <div class="table-head"><div><h3>Inventory items</h3><p class="sub-line">Showing ${fmtInt(shown.length)} of ${fmtInt(inv.items.length)} items</p></div>${tools}</div>
-      ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Status</th><th class="num">Current Stock</th><th class="num">Avg Cost</th><th class="num">Total Value</th><th>Last updated</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">${empty}</div>`}
+      ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Category</th><th>Base unit</th><th>Track stock</th><th class="num">Current Stock</th><th class="num">Avg Cost</th><th class="num">Total Value</th><th>Last updated</th><th class="num">Actions</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-line" style="padding:24px 20px">${empty}</div>`}
     </section>`;
   }
 

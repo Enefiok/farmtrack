@@ -64,7 +64,12 @@
       case "stock-history": openStockHistoryModal(act.dataset.id, act); break;
       case "export-inventory": exportInventory(); break;
       case "inv-chart-view": state.invChartView = act.dataset.view; renderView(); break;
-      case "inv-stock-filter": state.invStock = act.dataset.value; renderView(); break;
+      case "inv-stock-filter": state.invStock = act.dataset.value; paintInvTable(); break;
+      case "inv-clear-filters": {
+        state.invCategory = ""; state.invStock = ""; state.query = "";
+        const sb = $("#search"); if (sb) sb.value = "";
+        paintInvTable(); break;
+      }
       case "retry-inventory": state.inventory.status = "idle"; renderView(); break;
       case "toggle-note": {
         const dd = act.previousElementSibling; // the note text sits just before the button
@@ -131,7 +136,7 @@
       $("#chart").innerHTML = chartHTML();
       bindChart();
     }
-        if (e.target.id === "inv-category") { state.invCategory = e.target.value; renderView(); }
+        if (e.target.id === "inv-category") { state.invCategory = e.target.value; paintInvTable(); const sel = $("#inv-category"); if (sel) sel.focus(); }
         if (e.target.id === "dash-period") { state.dashPeriod = e.target.value; state.actPage = 0; renderView(); }
   });
 
@@ -139,7 +144,10 @@
     if (e.target.id === "search") {
       state.recPage = 0;
       state.query = e.target.value;
-      if ((route().page === "records" || route().page === "inventory") && state.status === "ready") renderView();
+      if (state.status === "ready") {
+        if (route().page === "inventory" && state.inventory.status === "ready" && state.inventory.items.length) paintInvTable();
+        else if (route().page === "records" || route().page === "inventory") renderView();
+      }
     }
   });
 
