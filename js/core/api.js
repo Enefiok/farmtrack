@@ -724,6 +724,36 @@
     return item.id;
   }
 
+  // Feed consumption must be linked to an inventory item, with the quantity in that item's base unit,
+  // so the backend can deduct stock, record cost and build the feed forecast.
+  // Returns { item, quantity } (quantity already converted and rounded to 2 places).
+  async function resolveFeedLink(farmId, v) {
+    const wanted = String(v.feed_item || "").trim().toLowerCase();
+    const items = await AgroAPI.listItems(farmId);
+    const item = items.find(function (i) { return String(i.name).trim().toLowerCase() === wanted; });
+    if (!item) throw new ApiError(0, { feed_item: ["Choose a feed item from your inventory."] });
+
+    const typed = String(v.unit || "").trim().toLowerCase();
+    const units = await AgroAPI.listUnits();
+    const chosen = units.find(function (u) {
+      return String(u.name).toLowerCase() === typed || String(u.abbreviation || "").toLowerCase() === typed;
+    });
+
+    let factor = 1;
+    const isBase = chosen
+      ? String(chosen.id) === String(item.base_unit)
+      : typed === String(item.base_unit_name || "").toLowerCase();
+    if (!isBase) {
+      const convs = chosen ? await AgroAPI.listConversions(farmId, item.id) : [];
+      const conv = chosen && convs.find(function (c) { return String(c.unit) === String(chosen.id); });
+      if (!conv) {
+        throw new ApiError(0, { unit: ["No conversion from " + v.unit + " to " + item.base_unit_name + " is set for " + item.name + ". Add it in Inventory first."] });
+      }
+      factor = conv.factor;
+    }
+    return { item: item.id, quantity: Math.round(Number(v.quantity) * factor * 100) / 100 };
+  }
+
   // Maps the form's field names to the names the backend expects.
   async function recordBody(type, farmId, v) {
     if (type === "flock") {
@@ -762,7 +792,7 @@
     }
     if (type === "activity") {
       const qty = v.birds !== undefined && v.birds !== "" ? v.birds : v.quantity;
-      return {
+      const body = {
         flock: v.flock ? toId(v.flock) : undefined,
         activity_type: v.code,
         quantity: qty === "" || qty == null ? undefined : Number(qty),
@@ -772,6 +802,13 @@
         event_date: v.date,
         classification: "LIVE"
       };
+      // Feed entries are linked to an inventory item and sent in that item's base unit.
+      if (v.code === "FEED_CONSUMPTION") {
+        const link = await resolveFeedLink(farmId, v);
+        body.item = link.item;
+        body.quantity = link.quantity;
+      }
+      return body;
     }
     const orZero = function (x) { return x === "" || x == null ? 0 : Number(x); };
     // The backend wants decimals as strings with two places ("3.00").

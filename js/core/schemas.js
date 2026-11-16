@@ -228,16 +228,22 @@
       centered: true,
       tabs: [
         { key: "feed", label: "Feed consumption", code: "FEED_CONSUMPTION",
-          // The feed item is a text box, so the Unit dropdown is matched on the typed name (byName).
-          // A name that is not an inventory item keeps the full unit list.
+          // The feed item is a dropdown of the farm's items; its value is the item name, so the Unit dropdown
+          // is matched on the chosen name (byName).
           unitFor: { item: "feed_item", unit: "unit", byName: true },
           fields: [
             { name: "date", label: "Date", type: "date", required: true },
-            // Suggests the farm's own items. Falls back to the common feed names while the item list is empty.
-            { name: "feed_item", label: "Feed item", type: "text", placeholder: "Enter feed item", required: true,
-              suggest: () => {
-                const names = ((state.lookups && state.lookups.items) || []).map((i) => i.name).filter(Boolean);
-                return names.length ? names : list("Layer mash", "Grower mash", "Starter feed", "Maize", "Soya");
+            // A dropdown of the farm's feed items. The value is the item name (not the id), because the Unit
+            // dropdown, the notes summary and the api.js name match all work on the name.
+            // isEggItem is declared further down in this file; options runs when the form opens, so that is safe.
+            { name: "feed_item", label: "Feed item", type: "select", placeholder: "Select feed item",
+              emptyText: "No feed items yet. Add one in Inventory first.", required: true,
+              options: () => {
+                const items = (state.lookups && state.lookups.items) || [];
+                const feeds = items.filter((i) => String(i.category || "").toUpperCase() === "FEED");
+                // If nothing is categorised as Feed, offer every item except eggs so the user is never stuck.
+                const pool = feeds.length ? feeds : items.filter((i) => !isEggItem(i));
+                return pool.map((i) => [i.name, i.name]);
               } },
             // joinUnit: this field and the Unit field below it are drawn as one row: [ 10 ] [ Bag v ]
             { name: "quantity", label: "Quantity", type: "number", placeholder: "Enter quantity", required: true, min: 0.01, joinUnit: "unit" },
