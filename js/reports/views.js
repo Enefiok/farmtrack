@@ -703,15 +703,35 @@
   /* =====================================================================
      11. TRACEABILITY  (key: traceability)   date picker lives in the page frame
      ===================================================================== */
+  // True when a name is missing or is just a placeholder dash / division sign / "null".
+  const isBlankName = function (s) {
+    return !s || /^[\s\-\u2013\u2014\u00f7]+$/.test(s) || /^(null|undefined|none|n\/a)$/i.test(s);
+  };
+
+  // Draws one chip per entry as "[Name]: [Qty] [Unit]".
+  //   nameKeys : keys to try for the name, in order (the item may also arrive as an object with a name)
+  //   opts.fallback : text shown when the name is missing, so the quantity is never lost
+  //   opts.pretty   : run the name through human() (for codes such as FEED_CONSUMPTION); item names are kept as typed
+  const traceChips = function (list, nameKeys, opts) {
+    opts = opts || {};
+    const l = arr(list);
+    if (!l.length) return '<span class="ra-kpi-note">None recorded</span>';
+    return '<div class="ra-chips">' + l.map(function (x) {
+      const raw = first(x, nameKeys);
+      let name = raw && typeof raw === "object" ? textOf(raw, ["name", "label", "item_name"]) : (raw === undefined ? "" : String(raw).trim());
+      if (!isBlankName(name) && opts.pretty) name = human(name);
+      if (isBlankName(name)) name = opts.fallback || "Unspecified";
+      const qty = numOf(x, ["qty", "quantity", "amount"]);
+      const unit = textOf(x, ["unit", "unit_name", "base_unit_name"]);
+      return '<span class="ra-chip">' + esc(name) + (qty !== null ? ": " + num(qty) + (unit ? " " + esc(unit) : "") : "") + "</span>";
+    }).join("") + "</div>";
+  };
+
   const traceability = {
     render: function (data) {
       data = data || {};
       const batches = arr(data.batches);
       const date = textOf(data, ["date"]);
-      const chips = function (list, nameKey) {
-        const l = arr(list);
-        return l.length ? '<div class="ra-chips">' + l.map(function (x) { return '<span class="ra-chip">' + esc(human(textOf(x, [nameKey]))) + (numOf(x, ["qty"]) !== null ? ": " + num(numOf(x, ["qty"])) : "") + "</span>"; }).join("") + "</div>" : '<span class="ra-kpi-note">None recorded</span>';
-      };
       const html = batches.length
         ? kpiGrid([
             kpiCard({ icon: "calendar", label: "Date", value: fmtDate(date) }),
@@ -720,8 +740,8 @@
           ]) +
           '<div class="ra-batch-list">' + batches.map(function (b) {
             return '<div class="ra-batch"><div class="ra-card-head" style="margin:0"><div><h3 class="ra-card-title">Flock ' + esc(textOf(b, ["flock"]) || "—") + '</h3><p class="ra-card-sub">Recorded by ' + esc(textOf(b, ["recorded_by"]) || "—") + '</p></div><span class="ra-badge good">' + num(numOf(b, ["eggs_saleable"])) + " saleable</span></div>" +
-              '<div><div class="ra-kpi-label" style="margin-bottom:6px">Feed used</div>' + chips(b.feed_used, "item") + "</div>" +
-              '<div><div class="ra-kpi-label" style="margin-bottom:6px">Other activities</div>' + chips(b.other_activities, "type") + "</div></div>";
+              '<div><div class="ra-kpi-label" style="margin-bottom:6px">Feed used</div>' + traceChips(b.feed_used, ["item", "item_name", "name", "feed"], { fallback: "Unspecified feed" }) + "</div>" +
+              '<div><div class="ra-kpi-label" style="margin-bottom:6px">Other activities</div>' + traceChips(b.other_activities, ["type", "activity_type", "name"], { pretty: true, fallback: "Activity" }) + "</div></div>";
           }).join("") + "</div>"
         : emptyState("No production batches on " + (date ? fmtDate(date) : "this date"));
       return { html: html };
