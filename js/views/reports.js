@@ -145,7 +145,7 @@
     const vis = visible(list);
     return TABS.map(function (t) {
       const n = t === "all" ? vis.length : vis.filter(function (r) { return r.group === t; }).length;
-      return '<button class="ra-tab" type="button" role="tab" data-rpt-action="tab" data-tab="' + t + '" aria-selected="' + (t === S.tab) + '">' +
+      return '<button class="ra-tab" type="button" role="tab" data-rpt-action="tab" data-rpt-tab="' + t + '" aria-selected="' + (t === S.tab) + '">' +
         (t === "all" ? "All" : t) + '<span class="ra-tab-count">' + n + "</span></button>";
     }).join("");
   }
@@ -342,6 +342,39 @@
     AgroAPI.getRecordsReport(farmId, "expense", range).then(function (rep) { trendDone("expense", rep, false); }, function () { trendDone("expense", null, true); });
   }
 
+
+  /* ---------- table pagination (same look as Records: "Page 1 of n" + Previous / Next) ---------- */
+  const TABLE_PAGE = 10;
+  function paginateTables(scope) {
+    if (!scope) return;
+    scope.querySelectorAll(".ra-table-wrap").forEach(function (wrap) {
+      const tbl = wrap.querySelector("table.ra-table");
+      if (!tbl || tbl.classList.contains("ra-pl") || wrap.dataset.paged) return;   // the income statement stays whole
+      const body = tbl.tBodies[0];
+      if (!body) return;
+      const rows = Array.prototype.slice.call(body.rows);
+      const pages = Math.ceil(rows.length / TABLE_PAGE);
+      if (pages < 2) return;
+      wrap.dataset.paged = "1";
+      let page = 0;
+      const foot = document.createElement("div");
+      foot.className = "ra-foot";
+      foot.innerHTML = '<span class="ra-foot-info"></span><div class="ra-pager"><button type="button" data-pg="prev">Previous</button><button type="button" data-pg="next">Next</button></div>';
+      wrap.parentNode.insertBefore(foot, wrap.nextSibling);
+      const info = foot.querySelector(".ra-foot-info"), prev = foot.querySelector('[data-pg="prev"]'), next = foot.querySelector('[data-pg="next"]');
+      function show() {
+        rows.forEach(function (r, i) { r.hidden = Math.floor(i / TABLE_PAGE) !== page; });
+        const from = page * TABLE_PAGE + 1, to = Math.min(rows.length, (page + 1) * TABLE_PAGE);
+        info.textContent = "Page " + (page + 1) + " of " + pages + " · Showing " + from + "–" + to + " of " + rows.length;
+        prev.disabled = page === 0;
+        next.disabled = page >= pages - 1;
+      }
+      prev.addEventListener("click", function () { page = Math.max(0, page - 1); show(); });
+      next.addEventListener("click", function () { page = Math.min(pages - 1, page + 1); show(); });
+      show();
+    });
+  }
+
   /* ---------- report page ---------- */
   const subText = function (key) {
     if (key === "traceability") return "Date: " + R.fmtDate(S.date);
@@ -391,6 +424,7 @@
       const debug = new URLSearchParams(location.search).get("debug") === "1"
         ? '<details class="ra-debug"><summary>Raw response</summary><pre>' + esc(JSON.stringify(data, null, 2)) + "</pre></details>" : "";
       body.innerHTML = R.insights(data.insights) + out.html + debug;
+      paginateTables(body);
       if (out.post) { try { out.post(body); } catch (err) { console.error("Report charts failed:", key, err); } }
     } catch (e) {
       if (stale()) return;
@@ -421,7 +455,7 @@
     const act = a.dataset.rptAction;
     if (act === "print") window.print();
     else if (act === "retry") { if (r.dataset.key) loadReport(r.dataset.key); else loadHub(); }
-    else if (act === "tab") { S.tab = a.dataset.tab; paintBrowse(); }
+    else if (act === "tab") { S.tab = a.dataset.rptTab; paintBrowse(); }
     else if (act === "seg") {
       const id = a.dataset.seg;
       S[id] = a.dataset.val;

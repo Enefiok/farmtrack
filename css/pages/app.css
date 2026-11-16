@@ -362,7 +362,7 @@
 
     /* ---------- Inventory table (scoped to .inv-table so Records tables stay as they were) ---------- */
     .inv-table { border-radius: 14px; }
-    .inv-table th { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding-top: 14px; padding-bottom: 14px; }
+    .inv-table th, .inv-table.table-card th { background: var(--field); color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding-top: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
     .inv-table tbody tr { transition: background .12s; }
     .inv-table tbody tr:hover { background: var(--green-tint); }
     .inv-table .table-head h3 { font-size: 18px; font-weight: 500; }
