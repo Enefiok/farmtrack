@@ -31,8 +31,11 @@
   const actDash = (v) => (v == null || v === "" ? "—" : v);
   const actPart = (k) => (r) => actDash((actParts(r).f || [])[k]);   // the k-th field of the summary
   const actNotes = (r) => actDash(actParts(r).notes);
-  const actUnit = (r) => r.unit || (r.code === "FEED_CONSUMPTION" ? (actParts(r).f || [])[2] || "" : "");
-  // The quantity with its unit when there is one, for example "12 Bag". Decimals are kept (2.5 Bag stays 2.5 Bag).
+  // The unit of the stored quantity. The backend sends unit_name (the item's base unit), and the stored quantity is
+  // always in that unit (25 kg stays "25 Kilogram" even if the farmer typed 1 Bag). The unit is NOT parsed out of the
+  // notes any more, because the notes hold the unit the farmer picked, which is not the unit of the stored number.
+  const actUnit = (r) => r.unit_name || r.unit || "";
+  // The quantity with its unit when there is one, for example "25 Kilogram". Decimals are kept (2.5 Kilogram stays 2.5 Kilogram).
   const actQtyText = (r) => (r.quantity == null ? "—" : fmtQty(r.quantity) + (actUnit(r) ? " " + actUnit(r) : ""));
   const COLS = {
     flock: [["Identifier", (r) => r.identifier], ["Breed/Type", (r) => r.breed], ["Arrival date", (r) => fmtDate(r.arrival_date)], ["Starting count", (r) => fmtInt(r.starting_count), 1], ["Current count", (r) => fmtInt(r.current_count), 1], ["Stage", (r) => r.stage], ["Status", (r) => r.status]],

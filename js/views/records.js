@@ -275,7 +275,7 @@
   /* =====================================================================
      FARM ACTIVITIES: table columns by selected activity type
      Same shape as COLS: [header, fn, isNumeric, truncate].
-     With "All activities" (or any type not listed here, such as Vaccination) the normal
+     With "All activities" (or any type not listed here) the normal
      COLS.activity is used. ROW_ACTIONS still draws the Actions column for every layout.
      ===================================================================== */
   // The flock's identifier. Falls back to whatever is on the row when the flock is not in the loaded list.
@@ -300,14 +300,16 @@
 
   // One column set per type, in the order of that type's form fields (see the tabs in schemas.js). Types whose form
   // has no Flock field (Flock change, Damage, Others) have no Flock column either.
+  // Feed, Medication and Vaccination are structured: the item and quantity come from the record itself
+  // (item_name, quantity, unit_name), not from the notes text.
   const ACTIVITY_COLS = {
     FEED_CONSUMPTION: [A_DATE, ["Feed item", actItem], ["Quantity", actQtyText, true], A_FLOCK, A_NOTES],
     MORTALITY:        [A_DATE, A_FLOCK, A_QTY("Birds lost"), ["Reason / cause", actPart(0), false, true], A_NOTES],
-    MEDICATION:       [A_DATE, A_FLOCK, ["Product", actPart(0)], ["Quantity / dose", actPart(1)], ["Next due", actPart(2)], A_NOTES],
+    MEDICATION:       [A_DATE, ["Medicine", (r) => actItem(r)], ["Quantity", actQtyText, true], A_FLOCK, ["Next due", (r) => (actParts(r).f || [])[2] || "—"], A_NOTES],
     FLOCK_CHANGE:     [A_DATE, ["Change type", actPart(0)], A_QTY("Quantity"), ["Reason", actPart(2), false, true], A_NOTES],
     LOSS:             [A_DATE, ["Affected item / quantity", actPart(0), false, true], ["Reason", actPart(1), false, true], A_NOTES],
     OTHER:            [A_DATE, ["Type / description", actPart(0), false, true], ["Reason", actPart(1), false, true], A_NOTES],
-    VACCINATION:      [A_DATE, A_FLOCK, A_NOTES]
+    VACCINATION:      [A_DATE, ["Vaccine", (r) => actItem(r)], ["Quantity", actQtyText, true], A_FLOCK, A_NOTES]
   };
 
   // The columns the table uses right now. Anything but a picked activity type uses the normal COLS.

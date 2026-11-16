@@ -37,18 +37,27 @@
     return `<div class="field" data-name="${f.name}"><label for="f-${f.name}">${esc(f.label)}</label>${controlHTML(f)}<p class="error" id="e-${f.name}" role="alert"></p>${reveal}</div>`;
   }
 
+  // The one-line "will be deducted from stock" hint. Starts empty (and hidden by CSS) until mountDeductPreview fills it.
+  function deductPreviewHTML() {
+    return `<p class="deduct-preview" id="deduct-preview" aria-live="polite"></p>`;
+  }
+
   // Quantity and Unit in one row: [ 10 ] [ Crate v ]. They stay two separate controls named
   // "quantity" and "unit", so readValues, validation and the payload are unchanged.
-  function qtyUnitHTML(q, u) {
-    return `<div class="field qty-unit" data-name="${q.name}"><label for="f-${q.name}">${esc(q.label)}</label><div class="qty-row input-group">${controlHTML(q)}${controlHTML(u)}</div><p class="error" id="e-${q.name}" role="alert"></p><p class="error" id="e-${u.name}" role="alert"></p></div>`;
+  // extra (optional) is HTML placed inside the same block, directly under the row and its error lines.
+  function qtyUnitHTML(q, u, extra) {
+    return `<div class="field qty-unit" data-name="${q.name}"><label for="f-${q.name}">${esc(q.label)}</label><div class="qty-row input-group">${controlHTML(q)}${controlHTML(u)}</div><p class="error" id="e-${q.name}" role="alert"></p><p class="error" id="e-${u.name}" role="alert"></p>${extra || ""}</div>`;
   }
 
   // All fields of a schema as HTML. A field with joinUnit swallows the unit field it points to.
+  // When the schema has deductPreview, the preview line is added under the Quantity + Unit row it points at.
   function fieldsHTML(s) {
     const joined = new Set(s.fields.filter((f) => f.joinUnit).map((f) => f.joinUnit));
     return s.fields.filter((f) => !joined.has(f.name)).map((f) => {
       const u = f.joinUnit && s.fields.find((x) => x.name === f.joinUnit);
-      return u ? qtyUnitHTML(f, u) : fieldHTML(f);
+      if (!u) return fieldHTML(f);
+      const extra = s.deductPreview && s.deductPreview.qty === f.name ? deductPreviewHTML() : "";
+      return qtyUnitHTML(f, u, extra);
     }).join("");
   }
 
@@ -193,8 +202,10 @@
   //   unitFor: { item: <name of the item control>, unit: <name of the unit select>, byName?: true }
   // byName is for a text box (the feed item), where the typed name is matched against the item names.
   const unitCache = new Map();           // "farmId:itemId" -> list of unit names
-  function clearUnitCache() { unitCache.clear(); }
+  const convCache = new Map();           // "farmId:itemId" -> [{ unit_name, factor }] (for the deduct preview)
+  function clearUnitCache() { unitCache.clear(); convCache.clear(); } // both caches reset together
   const unitSeqs = new Map();            // unit select name -> latest request number (ignores stale answers)
+  const deductSeq = new Map();           // deduct preview quantity field name -> latest request number
 
   // Finds the item the user picked: by id for a dropdown, by name for a text box.
   function lookupItem(ref, byName) {
@@ -220,6 +231,55 @@
     convs.forEach((c) => add(c.unit_name));
     unitCache.set(key, names);
     return names;
+  }
+
+  // The conversion rows { unit_name, factor } for an item, cached. Same source as unitsForItem.
+  async function convsForItem(item) {
+    const key = state.farmId + ":" + item.id;
+    if (convCache.has(key)) return convCache.get(key);
+    const convs = DEV ? ((state.inventory.devConv || {})[`dev-conv-${item.id}`] || []) : await AgroAPI.listConversions(state.farmId, item.id);
+    const rows = (convs || []).map((c) => ({ unit_name: c.unit_name, factor: c.factor }));
+    convCache.set(key, rows);
+    return rows;
+  }
+
+  // The base unit's name for an item ("" when unknown).
+  function baseUnitName(item) {
+    return String(item.base_unit_name || (findItem(item.id) || {}).base_unit_name || "").trim();
+  }
+
+  // The factor that turns one `unitName` into the item's base unit (1 Bag = 25 Kilogram -> 25).
+  // Returns null when unitName is the base unit, is unknown, or has no usable factor.
+  async function factorForUnit(item, unitName) {
+    const name = String(unitName || "").trim().toLowerCase();
+    if (!item || !name) return null;
+    if (name === baseUnitName(item).toLowerCase()) return null;
+    const rows = await convsForItem(item);
+    const hit = rows.find((c) => String(c.unit_name || "").trim().toLowerCase() === name);
+    const f = hit ? Number(hit.factor) : NaN;
+    return Number.isFinite(f) && f > 0 ? f : null;
+  }
+
+  // Fills (or clears) the live "will be deducted from stock" line for a schema with deductPreview.
+  // Shown only when the chosen unit is NOT the item's base unit, so a conversion really applies.
+  async function mountDeductPreview(form, s) {
+    const cfg = s && s.deductPreview;
+    if (!cfg) return;
+    const el = $("#deduct-preview", form);
+    if (!el) return;
+    const seq = (deductSeq.get(cfg.qty) || 0) + 1;
+    deductSeq.set(cfg.qty, seq);
+    const clear = () => { el.textContent = ""; };
+    const qEl = field(form, cfg.qty), uEl = field(form, cfg.unit), iEl = field(form, cfg.item);
+    if (!qEl || !uEl || !iEl) { clear(); return; }
+    const qty = num(qEl.value), unit = uEl.value, item = lookupItem(iEl.value, cfg.byName);
+    if (!item || !unit || !(qty > 0)) { clear(); return; }
+    const baseName = baseUnitName(item);
+    let factor = null;
+    try { factor = await factorForUnit(item, unit); } catch { factor = null; }
+    if (seq !== deductSeq.get(cfg.qty)) return; // the user changed something while this was loading
+    if (factor == null) { clear(); return; }
+    el.textContent = `\u2248 ${fmtQty(qty * factor)} ${baseName} will be deducted from stock`.replace(/\s{2,}/g, " ");
   }
 
   // Rebuilds the Unit options. keep = the unit that was selected before (kept when still allowed).
@@ -295,7 +355,8 @@
 
     function mountFields(keepDate) {
       const s = cur();
-      // fieldsHTML draws a Quantity field and its Unit field as one row where the schema asks for it (joinUnit)
+      // fieldsHTML draws a Quantity field and its Unit field as one row where the schema asks for it (joinUnit),
+      // and the deduct preview line under that row when the schema has deductPreview
       $("#form-grid").innerHTML = fieldsHTML(s);
       const today = localISO(new Date());
       $$('input[type="date"]', form).forEach((i) => {
@@ -319,14 +380,15 @@
     }
 
     // Set the first Unit choices once the starting values are in. A preset unit (Sell Birds) is kept when the item allows it.
-    syncUnits(form, cur());
+    // The deduct preview is drawn after the units settle, so a unit picked automatically is taken into account.
+    syncUnits(form, cur()).then(() => mountDeductPreview(form, cur()));
 
-    form.addEventListener("input", () => refreshComputed(form, cur()));
-    form.addEventListener("change", () => refreshComputed(form, cur()));
+    form.addEventListener("input", () => { refreshComputed(form, cur()); mountDeductPreview(form, cur()); });
+    form.addEventListener("change", () => { refreshComputed(form, cur()); mountDeductPreview(form, cur()); });
     // The item changed: refresh the Unit choices. Sales and Purchase use a dropdown (change event);
     // the feed form is a text box, so it also reacts while the user types or picks a suggestion.
     const watches = (name, byNameOnly) => [].concat(cur().unitFor || []).some((u) => u.item === name && (!byNameOnly || u.byName));
-    const onItemEvent = (e) => { if (watches(e.target.name)) syncUnits(form, cur()); };
+    const onItemEvent = (e) => { if (watches(e.target.name)) syncUnits(form, cur()).then(() => mountDeductPreview(form, cur())); };
     form.addEventListener("change", onItemEvent);
     form.addEventListener("input", (e) => { if (watches(e.target.name, true)) onItemEvent(e); });
     form.addEventListener("submit", (e) => {
@@ -353,7 +415,8 @@
         tabKey = b.dataset.mtab;
         $$("[data-mtab]", tabsEl).forEach((x) => x.setAttribute("aria-selected", String(x === b)));
         mountFields(date);
-        syncUnits(form, cur()); // the new tab may have its own Unit rules (Feed consumption)
+        // the new tab may have its own Unit rules (Feed consumption) and its own deduct preview
+        syncUnits(form, cur()).then(() => mountDeductPreview(form, cur()));
       });
     }
 

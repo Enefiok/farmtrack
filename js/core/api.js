@@ -587,7 +587,9 @@
     purchase:   { base: "purchases",  stats: "stats/", trend: "trend/", breakdown: null },
     expense:    { base: "expenses",   stats: "stats/", trend: "trend/", breakdown: "by-category/", breakdownDated: true },
     flock:      { base: "flocks",     stats: "stats/", trend: null,     breakdown: "by-stage/",    breakdownDated: false },
-    activity:   { base: "activities", stats: "stats/", trend: "trend/", breakdown: "by-type/",     breakdownDated: true },
+    // The backend has no /activities/by-type/ endpoint. The "By Type" donut reads stats.by_type instead,
+    // so the breakdown request is switched off (it only produced a harmless 404).
+    activity:   { base: "activities", stats: "stats/", trend: "trend/", breakdown: null },
     inventory:  { base: "items",      stats: "stats/", trend: "trend/", breakdown: "by-category/", breakdownDated: true }
   };
 
@@ -754,6 +756,34 @@
     return { item: item.id, quantity: Math.round(Number(v.quantity) * factor * 100) / 100 };
   }
 
+  // Medication and Vaccination let the user type a name that is not in Inventory yet.
+  // This makes sure an item with that name exists: if it does not, it is created as a stock-tracked
+  // MEDICINE item. The new item's base unit is the unit the user typed (so the quantity needs no
+  // conversion), falling back to Piece / Bottle / Vial / Sachet, then to the first unit on the server.
+  async function ensureMedicineItem(farmId, name, unitName) {
+    const wanted = String(name || "").trim().toLowerCase();
+    if (!wanted) return;
+    const items = await AgroAPI.listItems(farmId);
+    const exists = items.some(function (i) { return String(i.name).trim().toLowerCase() === wanted; });
+    if (exists) return;
+
+    const units = await AgroAPI.listUnits();
+    const typed = String(unitName || "").trim().toLowerCase();
+    const typedUnit = typed && units.find(function (u) {
+      return String(u.name).toLowerCase() === typed || String(u.abbreviation || "").toLowerCase() === typed;
+    });
+    const fallback = units.find(function (u) { return /^(piece|bottle|vial|sachet)$/i.test(u.name); });
+    const base = typedUnit || fallback || units[0];
+    if (!base) throw new ApiError(0, null, "No units are set up on the server, so the new medicine could not be created.");
+
+    await AgroAPI.createItem(farmId, {
+      name: String(name).trim(),
+      category: "MEDICINE",
+      base_unit: base.id,
+      is_stock_tracked: true
+    });
+  }
+
   // Maps the form's field names to the names the backend expects.
   async function recordBody(type, farmId, v) {
     if (type === "flock") {
@@ -802,11 +832,29 @@
         event_date: v.date,
         classification: "LIVE"
       };
+
       // Feed entries are linked to an inventory item and sent in that item's base unit.
       if (v.code === "FEED_CONSUMPTION") {
         const link = await resolveFeedLink(farmId, v);
         body.item = link.item;
         body.quantity = link.quantity;
+      }
+      // Medication & Vaccination: the user can pick a medicine or type a new name.
+      // A new name is created in Inventory first (see ensureMedicineItem), then the activity is linked
+      // to that item so stock and cost are captured. If anything in this linking fails, the activity is
+      // still saved as a plain record with no stock link, instead of blocking the user.
+      if (v.code === "MEDICATION" || v.code === "VACCINATION") {
+        const itemName = String(v.med_item || v.vax_item || v.product || "").trim();
+        if (itemName) {
+          try {
+            await ensureMedicineItem(farmId, itemName, v.unit);
+            const link = await resolveFeedLink(farmId, { feed_item: itemName, quantity: v.quantity, unit: v.unit });
+            body.item = link.item;
+            body.quantity = link.quantity;
+          } catch (e) {
+            // Could not create or link the item -> keep the free-text record, no stock link.
+          }
+        }
       }
       return body;
     }

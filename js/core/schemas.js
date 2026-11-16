@@ -9,6 +9,11 @@
   const flockName = (id) => (findFlock(id) || {}).identifier || "—";
   const list = (...a) => a;
   const UNITS = list("Egg", "Tray", "Crate", "Bird", "Bag", "Kg", "Litre", "Piece");
+  // Units offered on the Medication and Vaccination forms (fallback only).
+  // Once a real medicine item is chosen, unitFor narrows this to that item's
+  // base unit + its conversions. A "dose" is a usage note, not a stock unit,
+  // so it is intentionally NOT in this list.
+  const MED_UNITS = list("Bottle", "Vial", "Sachet", "ml", "Litre", "Piece");
   // Units offered on the Sales form (what the goods are sold in) and on the Purchase form (what they are bought in).
   // These are the fallback lists. Once an item is chosen, the Unit dropdown is narrowed to that item's
   // base unit plus the units that have a conversion for it (see unitFor on the schemas below).
@@ -17,6 +22,8 @@
   // Units offered on the Production form for eggs collected and eggs damaged. Fallback only;
   // once an item is chosen, each Unit dropdown follows that item's base unit and conversions.
   const PRODUCTION_UNITS = [["Egg", "Egg"], ["Tray", "Tray"], ["Crate", "Crate"]];
+  // The Expense form's Category dropdown. The chosen value is sent as one string in `category`.
+  const EXPENSE_CATEGORIES = list("Labor", "Transport", "Utilities", "Rent/Lease", "Maintenance", "Veterinary Services", "Feed Purchase", "Medicine Purchase", "Miscellaneous", "General");
   const fieldOf = (s, name) => allFields(s).find((f) => f.name === name);
   const unitQty = (r) => `${fmtInt(r.quantity)}${r.unit ? " " + r.unit : ""}`;
 
@@ -183,7 +190,9 @@
         { name: "supplier", label: "Supplier", type: "text", placeholder: "Enter or choose a supplier", required: true, suggest: () => (state.lookups.suppliers || []).map((s) => s.name) },
         // Sent to the backend as receipt_status. New purchases default to Received.
         { name: "receipt_status", label: "Receipt Status", type: "select", placeholder: "Select status", required: true, default: "RECEIVED", options: [["RECEIVED", "Received"], ["ORDERED", "Ordered"]] },
-        { name: "item", label: "Item", type: "select", placeholder: "Enter item", emptyText: "No items yet. Add an item on the server first.", required: true, options: () => state.lookups.items.map((i) => [i.id, i.name]) },
+        // Lists ALL inventory items, whatever their category (Feed, Medicine/Vaccine, Egg, Livestock, Supply, Equipment).
+        // There is no category filter here on purpose. An item that is missing has not been created in Inventory yet.
+        { name: "item", label: "Item", type: "select", placeholder: "Select item", emptyText: "No items yet. Add one in Inventory first.", required: true, options: () => (state.lookups.items || []).map((i) => [i.id, i.name]) },
         // joinUnit: this field and the Unit field below it are drawn as one row: [ 10 ] [ Bag v ]
         { name: "quantity", label: "Quantity", type: "number", placeholder: "Enter quantity", required: true, min: 0.01, joinUnit: "unit" },
         // What the goods are bought in (for example Bags of feed or Bottles of medicine). Sent inside the purchase line.
@@ -209,6 +218,8 @@
       errorMap: { event_date: "date", party: "supplier", notes: "description" },
       fields: [
         { name: "date", label: "Expense Date", type: "date", required: true },
+        // A dropdown (not free text). The chosen value is sent as one string in `category`.
+        { name: "category", label: "Category", type: "select", placeholder: "Select category", required: true, options: EXPENSE_CATEGORIES },
         // Optional. Type a new name or pick an existing supplier. A new name is saved as a supplier automatically.
         { name: "supplier", label: "Supplier (Optional)", type: "text", placeholder: "Enter or choose a supplier", suggest: () => (state.lookups.suppliers || []).map((x) => x.name) },
         { name: "amount", label: "Amount", type: "number", placeholder: "Enter amount", required: true, min: 0.01, step: "0.01" },
@@ -231,6 +242,9 @@
           // The feed item is a dropdown of the farm's items; its value is the item name, so the Unit dropdown
           // is matched on the chosen name (byName).
           unitFor: { item: "feed_item", unit: "unit", byName: true },
+          // Live preview under the Quantity/Unit row: when the chosen unit is not the item's base unit, show
+          // "≈ X <base unit> will be deducted from stock". forms.js reads this (see mountDeductPreview).
+          deductPreview: { item: "feed_item", qty: "quantity", unit: "unit", byName: true },
           fields: [
             { name: "date", label: "Date", type: "date", required: true },
             // A dropdown of the farm's feed items. The value is the item name (not the id), because the Unit
@@ -269,16 +283,46 @@
             const fl = findFlock(v.flock);
             return fl ? `${fl.identifier} will go from ${fmtInt(fl.current_count)} to ${fmtInt(Math.max(0, num(fl.current_count) - num(v.birds)))} birds.` : "";
           } },
+        // UPDATED: Medication now uses a text input with suggestions (type or select).
+        // If the user types a new name, api.js will automatically create it in Inventory.
+        // The summary keeps the "product (dose)" shape so tables.js actPart(2) still extracts the
+        // next-due date without any change to that file.
         { key: "medication", label: "Medication", code: "MEDICATION",
+          unitFor: { item: "med_item", unit: "unit", byName: true },
+          deductPreview: { item: "med_item", qty: "quantity", unit: "unit", byName: true },
           fields: [
             { name: "date", label: "Date", type: "date", required: true },
             { name: "flock", label: "Flock", type: "select", placeholder: "Enter flock", emptyText: "Add a flock first", required: true, options: flockOptions },
-            { name: "product", label: "Product", type: "text", placeholder: "Enter product", required: true },
-            { name: "dose", label: "Quantity/Dose", type: "text", placeholder: "Enter quantity or dose", required: true },
+            { name: "med_item", label: "Medicine", type: "text", placeholder: "Type or select medicine", required: true,
+              suggest: () => {
+                const items = (state.lookups && state.lookups.items) || [];
+                return items.filter((i) => /MEDICINE|VACCINE|VACCINATION/i.test(String(i.category || ""))).map((i) => i.name);
+              } },
+            { name: "quantity", label: "Quantity", type: "number", placeholder: "Enter quantity", required: true, min: 0.01, joinUnit: "unit" },
+            { name: "unit", label: "Unit", type: "select", placeholder: "Enter unit", required: true, options: MED_UNITS },
             { name: "next_due", label: "Next due date", type: "date", placeholder: "Enter date", noDefault: true },
             { name: "notes", label: "Notes", type: "textarea", placeholder: "Write Something" },
           ],
-          summary: (v) => `${v.product} (${v.dose})${v.next_due ? ", next due " + fmtDate(v.next_due) : ""}` },
+          summary: (v) => `${v.med_item} (${v.quantity} ${v.unit})${v.next_due ? ", next due " + fmtDate(v.next_due) : ""}` },
+        // UPDATED: Vaccination also uses a text input with suggestions for seamless custom entry.
+        // (The backend always had a VACCINATION type but the form never offered one,
+        // which is why Vaccination was always ₦0.) Same structured shape as Medication.
+        { key: "vaccination", label: "Vaccination", code: "VACCINATION",
+          unitFor: { item: "vax_item", unit: "unit", byName: true },
+          deductPreview: { item: "vax_item", qty: "quantity", unit: "unit", byName: true },
+          fields: [
+            { name: "date", label: "Date", type: "date", required: true },
+            { name: "flock", label: "Flock", type: "select", placeholder: "Enter flock", emptyText: "Add a flock first", required: true, options: flockOptions },
+            { name: "vax_item", label: "Vaccine", type: "text", placeholder: "Type or select vaccine", required: true,
+              suggest: () => {
+                const items = (state.lookups && state.lookups.items) || [];
+                return items.filter((i) => /MEDICINE|VACCINE|VACCINATION/i.test(String(i.category || ""))).map((i) => i.name);
+              } },
+            { name: "quantity", label: "Quantity", type: "number", placeholder: "Enter quantity", required: true, min: 0.01, joinUnit: "unit" },
+            { name: "unit", label: "Unit", type: "select", placeholder: "Enter unit", required: true, options: MED_UNITS },
+            { name: "notes", label: "Notes", type: "textarea", placeholder: "Write Something" },
+          ],
+          summary: (v) => `${v.vax_item}: ${v.quantity} ${v.unit}` },
         { key: "flock_change", label: "Flock change", code: "FLOCK_CHANGE",
           fields: [
             { name: "date", label: "Date", type: "date", required: true },
