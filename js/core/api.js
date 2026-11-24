@@ -42,6 +42,8 @@
       dashboard: "/api/farms/{farm}/dashboard/",
       reports: "/api/farms/{farm}/reports/",
       notifications: "/api/farms/{farm}/notifications/",
+      targets: "/api/farms/{farm}/targets/",
+      forecasts: "/api/farms/{farm}/forecasts/",
     },
     DEFAULTS: { eggUnitId: 2, eggItemId: null },
   };
@@ -1574,6 +1576,31 @@
     },
     updateNotificationPreferences: async function (farmId, preferences) {
       return await request("PUT", farmUrl("notifications", farmId) + "preferences/", { preferences });
+    },
+
+    // --- Targets & Forecasts ---
+    listTargets: async function (farmId, month) {
+      const qs = month ? `?month=${month}` : '';
+      return await request("GET", farmUrl("targets", farmId) + qs);
+    },
+    createTarget: async function (farmId, data) {
+      return await request("POST", farmUrl("targets", farmId), data);
+    },
+    updateTarget: async function (farmId, id, data) {
+      return await request("PUT", farmUrl("targets", farmId) + id + "/", data);
+    },
+    deleteTarget: async function (farmId, id) {
+      return await request("DELETE", farmUrl("targets", farmId) + id + "/");
+    },
+    getTargetProgress: async function (farmId, month) {
+      const qs = month ? `?month=${month}` : '';
+      return await request("GET", farmUrl("targets", farmId) + "progress/" + qs);
+    },
+    getForecasts: async function (farmId, metric, days) {
+      const params = new URLSearchParams();
+      if (metric) params.append('metric', metric);
+      if (days) params.append('days', days);
+      return await request("GET", farmUrl("forecasts", farmId) + '?' + params.toString());
     },
   };
 

@@ -146,6 +146,8 @@ function dashboardView() {
         ${statCard("trend", "Sales", fmtMoney0(m.sellM), m.sellDelta, "From previous period")}
       </div>
 
+      ${typeof targetsForecastSection === "function" ? targetsForecastSection() : ""}
+
       <div class="dash-grid">
         <section class="card area-chart">
           <div class="card-head">

@@ -1,0 +1,84 @@
+/* =========================================================================
+   targets.css  (css/components/targets.css)
+   Dashboard "Targets" + "Forecast" cards and the "Manage targets" window.
+   Load AFTER app.css. Every class starts with "tf-", so nothing existing is touched.
+   Uses the app's own variables (--green, --line, --muted, --card, --warn-bg, --warn-text, --error ...).
+   ========================================================================= */
+
+.tf-row { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; margin-bottom: 24px; }
+.tf-card { min-width: 0; }
+.tf-card .card-head { margin-bottom: 12px; align-items: flex-start; }
+.tf-sub { margin: 4px 0 0; font-size: 11px; color: var(--muted); }
+
+/* ---------- target rows ---------- */
+.tf-target { padding: 14px 0; border-top: 1px solid var(--line); }
+.tf-target:first-of-type { border-top: 0; padding-top: 4px; }
+.tf-t-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tf-t-top b { font-size: 13px; font-weight: 500; }
+.tf-t-nums { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 8px 0 6px; font-size: 15px; font-weight: 500; }
+.tf-t-nums small { font-size: 11px; font-weight: 400; color: var(--muted); }
+.tf-t-nums span:last-child { font-size: 12px; color: var(--muted); font-weight: 400; }
+.tf-bar { margin-bottom: 8px; }
+.tf-bar i { transition: width .3s ease; }
+.tf-bar.s-ok i { background: var(--green); }
+.tf-bar.s-warn i { background: #e0a100; }
+.tf-bar.s-bad i { background: var(--error); }
+.tf-bar.s-idle i { background: var(--muted); }
+.tf-pill { padding: 2px 8px; border-radius: 99px; font-size: 10px; font-weight: 500; white-space: nowrap; }
+.tf-pill.s-ok { background: var(--green-soft); color: var(--green); }
+.tf-pill.s-warn { background: var(--warn-bg); color: var(--warn-text); }
+.tf-pill.s-bad { background: color-mix(in srgb, var(--error) 14%, transparent); color: var(--error); }
+.tf-pill.s-idle { background: var(--field); color: var(--muted); }
+.tf-proj { margin: 0; font-size: 11px; color: var(--muted); }
+.tf-proj b { font-weight: 500; color: var(--text); }
+
+.tf-state { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 26px 8px; text-align: center; font-size: 12px; color: var(--muted); }
+.tf-state p { margin: 0; max-width: 300px; }
+.tf-state.err p { color: var(--error); }
+.tf-state .spinner { width: 22px; height: 22px; margin: 0; }
+
+/* ---------- forecast ---------- */
+.tf-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.tf-tab { padding: 5px 10px; border: 1px solid var(--line); border-radius: 99px; background: none; color: var(--muted); font-size: 11px; }
+.tf-tab:hover { color: var(--text); background: var(--green-tint); }
+.tf-tab.on { border-color: var(--green); background: var(--green-soft); color: var(--green); }
+.tf-fc-lbl { font-size: 11px; color: var(--muted); }
+.tf-conf { font-style: normal; font-weight: 500; }
+.tf-conf.c-high { color: var(--green); }
+.tf-conf.c-medium { color: var(--warn-text); }
+.tf-conf.c-low { color: var(--error); }
+.tf-fc-val { margin: 4px 0 2px; font-size: 28px; font-weight: 500; line-height: 1.15; }
+.tf-na { font-size: 14px; font-weight: 400; color: var(--muted); }
+.tf-fc-range { margin: 0 0 12px; font-size: 12px; color: var(--muted); }
+.tf-range { margin: 4px 2px 14px; }
+.tf-range-band { position: relative; height: 8px; border-radius: 99px; background: color-mix(in srgb, var(--green) 22%, transparent); }
+.tf-range-mark { position: absolute; top: -3px; width: 4px; height: 14px; margin-left: -2px; border-radius: 2px; background: var(--green); }
+.tf-range-ends { display: flex; justify-content: space-between; margin-top: 6px; font-size: 10px; color: var(--muted); }
+.tf-assume { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+.tf-assume summary { cursor: pointer; color: var(--muted); }
+.tf-assume summary:hover { color: var(--green); }
+.tf-assume ul { margin: 8px 0 0; padding-left: 18px; line-height: 1.5; }
+
+/* ---------- Manage targets window ---------- */
+.tf-modal { width: min(100%, 560px); }
+.tf-mlist { list-style: none; margin: 0 0 18px; padding: 0; border: 1px solid var(--line); border-radius: 10px; }
+.tf-mrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.tf-mrow:first-child { border-top: 0; }
+.tf-mrow b { display: block; font-size: 13px; font-weight: 500; }
+.tf-mrow span { font-size: 12px; color: var(--muted); }
+.tf-mact { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.tf-mact .tool-btn { height: 32px; font-size: 12px; }
+.tf-mact .tool-btn.danger { border-color: var(--error); color: var(--error); }
+.tf-ask { font-size: 12px; color: var(--error); }
+.tf-mnone { margin: 0 0 18px; padding: 14px; border: 1px dashed var(--line); border-radius: 10px; font-size: 12px; color: var(--muted); text-align: center; }
+.tf-fh { margin: 0 0 14px; font-size: 14px; font-weight: 500; }
+.tf-modal .form-grid { gap: 16px 20px; }
+.tf-actions { gap: 10px; margin-top: 22px; }
+
+@media (max-width: 900px) { .tf-row { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 640px) {
+  .tf-modal .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .tf-mrow { flex-wrap: wrap; }
+  .tf-fc-val { font-size: 24px; }
+}
+@media (prefers-reduced-motion: reduce) { .tf-bar i { transition: none; } }
