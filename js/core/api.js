@@ -41,6 +41,7 @@
       // Financial, operations and alert summary for the Dashboard. Takes ?days=30 (or 7, 90 ...).
       dashboard: "/api/farms/{farm}/dashboard/",
       reports: "/api/farms/{farm}/reports/",
+      notifications: "/api/farms/{farm}/notifications/",
     },
     DEFAULTS: { eggUnitId: 2, eggItemId: null },
   };
@@ -1552,6 +1553,27 @@
       LS.set(K_FARM_CACHE + currentEmail, cache);
 
       return farm;
+    },
+
+    // --- Notifications ---
+    listNotifications: async function (farmId, params) {
+      const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+      return await request("GET", farmUrl("notifications", farmId) + qs);
+    },
+    getUnreadNotificationCount: async function (farmId) {
+      return await request("GET", farmUrl("notifications", farmId) + "unread-count/");
+    },
+    markNotificationRead: async function (farmId, id) {
+      return request("POST", farmUrl("notifications", farmId) + encodeURIComponent(id) + "/mark-read/");
+    },
+    markAllNotificationsRead: async function (farmId) {
+      return request("POST", farmUrl("notifications", farmId) + "mark-all-read/");
+    },
+    getNotificationPreferences: async function (farmId) {
+      return await request("GET", farmUrl("notifications", farmId) + "preferences/");
+    },
+    updateNotificationPreferences: async function (farmId, preferences) {
+      return await request("PUT", farmUrl("notifications", farmId) + "preferences/", { preferences });
     },
   };
 

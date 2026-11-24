@@ -13,6 +13,7 @@
   };
   function route() {
     const [, page = "dashboard", sub] = location.hash.split("/");
+    if (page === "notifications") return { page: "reports", sub, notifications: true }; // Notification Centre: Reports stays highlighted in the sidebar
     const p = NAV.some((n) => n[0] === page) ? page : "dashboard";
     return { page: p, sub };
   }
@@ -39,6 +40,7 @@
     $("#menu-btn").innerHTML = icon("menu", 20);
     $("#search-box").innerHTML = `${icon("search", 18)}<input id="search" type="search" placeholder="Search" aria-label="Search" autocomplete="off">`;
     $("#bell-btn").innerHTML = icon("bell", 18);
+    if (window.AgroNotif) AgroNotif.sync(); // unread badge + bell dropdown
     $("#user-btn").innerHTML = `<span class="avatar" aria-hidden="true">${esc(initials(state.user.name))}</span><div><b>${esc(state.user.name)}</b><small>${esc(state.user.email)}</small></div>${icon("chevronDown", 18)}`;
     $("#user-menu").innerHTML = `<div class="head"><b>${esc(state.user.name)}</b><span>${esc(state.user.email)}</span></div><button data-action="signout">Sign out ${icon("logout", 16)}</button>`;
   }
@@ -75,7 +77,8 @@
       if (state.inventory.status === "idle") loadInventory();
       view.innerHTML = inventoryView();
     } else if (page === "reports") {
-      view.innerHTML = reportsView(sub);
+      if (route().notifications) { view.innerHTML = notificationsView(sub); document.title = "Notifications | AgroFlow"; }
+      else view.innerHTML = reportsView(sub);
     } else {
       view.innerHTML = comingSoon(names[page]);
     }
