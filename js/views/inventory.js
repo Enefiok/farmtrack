@@ -178,6 +178,9 @@
   function invTableHTML() {
     const inv = state.inventory;
     const shown = inventoryShown();
+    // Edit, Conversions and Archive change data, so they only show for roles that may edit inventory.
+    // History is read-only and always shows.
+    const mayEdit = canEdit("inventory");
     const menuItem = (action, id, ic, label, cls) => `<button type="button" role="menuitem"${cls ? ` class="${cls}"` : ""} data-action="${action}" data-id="${esc(id)}">${icon(ic, 15)}${label}</button>`;
     const rows = shown.map((i) => {
       const mid = `inv-menu-${i.id}`;
@@ -195,7 +198,7 @@
       ${middle}
       <td>${i.updated_at ? esc(fmtStamp(i.updated_at)) : invDash}</td>
       <td class="num"><div class="menu-wrap" style="display:inline-block"><button class="icon-btn square row-btn" type="button" data-menu="${mid}" data-fixed aria-haspopup="true" aria-label="Actions for ${esc(i.name)}">${icon("more", 16)}</button>
-        <div class="menu tbl-menu" id="${mid}" role="menu" hidden>${menuItem("edit-item", i.id, "edit", "Edit")}${menuItem("manage-conversions", i.id, "convert", "Conversions")}${menuItem("stock-history", i.id, "history", "History")}${menuItem("archive-item", i.id, "archive", "Archive", "danger")}</div></div></td></tr>`;
+        <div class="menu tbl-menu" id="${mid}" role="menu" hidden>${mayEdit ? menuItem("edit-item", i.id, "edit", "Edit") : ""}${mayEdit ? menuItem("manage-conversions", i.id, "convert", "Conversions") : ""}${menuItem("stock-history", i.id, "history", "History")}${mayEdit ? menuItem("archive-item", i.id, "archive", "Archive", "danger") : ""}</div></div></td></tr>`;
     }).join("");
 
     const cat = state.invCategory || "", stk = state.invStock || "";

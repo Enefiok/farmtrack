@@ -159,4 +159,17 @@
 
     .alt { margin: 14px 0 0; text-align: center; font-size: 11px; }
 
+    /* Forgot password + Sign up links on one row */
+    .alt-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 4px 10px;
+    }
+    .alt-row .alt-sep { color: #c4c9c6; }
+    @media (max-width: 480px) {
+      .alt-row .alt-sep { display: none; }
+    }
+
     @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

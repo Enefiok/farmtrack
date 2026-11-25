@@ -9,8 +9,10 @@
   // lines (optional): [{ name, quantity, unit, unit_price, total }]
   // adjust (optional): { type, id, extra? } adds the "Adjustment history" block and the Adjust button.
   //   "extra" is optional button HTML shown before the Adjust button (for example "Sell Birds" on a flock).
+  //   The Adjust button only shows for roles that may edit this kind of record (canEdit in permissions.js).
   // summary (optional): { badge: [text, tone], stats: [[label, value], ...] } is a headline strip at the top.
-  // pay (optional): { type, id, payments, outstanding } adds the "Payment history" block and the "Record Payment" button.
+  // pay (optional): { type, id, payments, outstanding } adds the "Payment history" block and the "Record Payment" button
+  //   (the button only shows for roles that may edit that kind of record).
   // profitHTML (optional): ready-made HTML for the "Profitability" block, shown under the Items table (sales only).
   function openDetailModal(title, sub, rows, lines, trigger, adjust, summary, pay, profitHTML) {
     modalTrigger = trigger || document.activeElement;
@@ -37,6 +39,9 @@
     const by = hasVal(meta["Created By"]) ? meta["Created By"] : "";
     const at = hasVal(meta["Created At"]) ? meta["Created At"] : "";
     const footer = by || at ? `<p class="dv-meta">Created${by ? " by " + esc(by) : ""}${at ? " · " + esc(at) : ""}</p>` : "";
+    // Which buttons this person may see.
+    const showPay = !!(pay && pay.outstanding > 0 && canEdit(pay.type));
+    const showAdjust = !!(adjust && canEdit(adjust.type));
     // The quantity is shown with its unit next to it, for example "67 Crate".
     const linesHTML = lines ? `<h3 class="dv-h">Items</h3>
       <div class="table-wrap mini-lines"><table><thead><tr><th>Item</th><th class="num">Quantity</th><th class="num">Unit price</th><th class="num">Total</th></tr></thead><tbody>${
@@ -53,7 +58,7 @@
           ${items ? `<h3 class="dv-h">Details</h3><dl class="dv-grid">${items}</dl>` : ""}
           ${linesHTML}${profitHTML || ""}${pay ? paymentHistoryHTML(pay.payments) : ""}${adjust ? adjHistoryHTML(adjust.type, adjust.id) : ""}
           ${footer}
-          <div class="actions" style="margin-top:24px">${pay && pay.outstanding > 0 ? payBtn(pay.type, pay.id) : ""}${adjust && adjust.extra ? adjust.extra : ""}${adjust ? adjustBtn(adjust.type, adjust.id) : ""}<button class="btn" type="button" data-close>Close</button></div>
+          <div class="actions" style="margin-top:24px">${showPay ? payBtn(pay.type, pay.id) : ""}${adjust && adjust.extra ? adjust.extra : ""}${showAdjust ? adjustBtn(adjust.type, adjust.id) : ""}<button class="btn" type="button" data-close>Close</button></div>
         </div>
       </div>`;
     document.body.style.overflow = "hidden";
@@ -85,8 +90,9 @@
   function openViewFlockModal(flockId, trigger) {
     const f = state.data.flock.find((x) => String(x.id) === String(flockId));
     if (!f) return;
-    // The "Sell Birds" button only appears while the flock still has birds to sell.
-    const sellBtn = num(f.current_count) > 0
+    // The "Sell Birds" button only appears while the flock still has birds to sell,
+    // and only for roles that may record sales.
+    const sellBtn = num(f.current_count) > 0 && canEdit("sales")
       ? `<button class="btn" type="button" data-action="sell-flock" data-id="${esc(f.id)}">${icon("wallet", 15)}Sell Birds</button>`
       : "";
     openDetailModal("Flock details", `${f.identifier}: complete record for this flock`, [

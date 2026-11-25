@@ -52,7 +52,8 @@
   const viewBtn = (action) => (r) => `<button class="btn ghost" type="button" style="padding:4px 10px;font-size:12px" data-action="${action}" data-id="${esc(r.id)}">View</button>`;
   // The pencil opens the "Adjust" form for that record (flocks, sales, purchases and expenses).
   const pencilBtn = (type) => (r) => `<button class="btn ghost" type="button" title="Adjust this record" aria-label="Adjust this record" style="padding:4px 8px;font-size:12px" data-action="adjust-record" data-rtype="${type}" data-id="${esc(r.id)}">${icon("edit", 15)}</button>`;
-  const rowBtns = (view, type) => (r) => `<span style="display:inline-flex;gap:6px;align-items:center">${view(r)}${pencilBtn(type)(r)}</span>`;
+  // The pencil only shows for roles allowed to edit this kind of record (see canEdit in permissions.js).
+  const rowBtns = (view, type) => (r) => `<span style="display:inline-flex;gap:6px;align-items:center">${view(r)}${canEdit(type) ? pencilBtn(type)(r) : ""}</span>`;
   const ROW_ACTIONS = {
     flock: rowBtns(viewBtn("view-flock"), "flock"),
     production: rowBtns(viewBtn("view-production"), "production"),

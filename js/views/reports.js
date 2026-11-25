@@ -4,6 +4,7 @@
    Period Comparison (#/reports/period-comparison) has its own panel: Period A vs Period B, each with a
    preset or custom From/To dates, a Swap button and a Compare button.
    Needs js/reports/charts.js and js/reports/views.js loaded first (window.RPT).
+   Needs js/core/permissions.js (canViewReport, canViewFinancialReports) loaded first.
    Only one global is exposed: reportsView(sub). Click/change handlers use data-rpt-action, never data-action. */
 (function () {
   "use strict";
@@ -140,13 +141,18 @@
   const hubIcon = function (name) { return R.icon(name && typeof ICONS !== "undefined" && ICONS[name] ? name : "reports", 20); };
 
   /* ---------- overview: search, tabs, cards (repainted in place) ---------- */
+  // ROLE RULE: reports the current role may not open (financial ones for Staff) are dropped here,
+  // so they vanish from the cards and from the tab counts.
   function visible(list) {
     const q = S.search.trim().toLowerCase();
-    return list.filter(function (r) { return !q || (r.title + " " + r.desc + " " + r.group).toLowerCase().indexOf(q) !== -1; });
+    return list.filter(function (r) {
+      return canViewReport(r.key) && (!q || (r.title + " " + r.desc + " " + r.group).toLowerCase().indexOf(q) !== -1);
+    });
   }
   function tabsHTML(list) {
     const vis = visible(list);
-    return TABS.map(function (t) {
+    // ROLE RULE: Staff do not get the "Financial" tab at all.
+    return TABS.filter(function (t) { return t !== "Financial" || canViewFinancialReports(); }).map(function (t) {
       const n = t === "all" ? vis.length : vis.filter(function (r) { return r.group === t; }).length;
       return '<button class="ra-tab" type="button" role="tab" data-rpt-action="tab" data-rpt-tab="' + t + '" aria-selected="' + (t === S.tab) + '">' +
         (t === "all" ? "All" : t) + '<span class="ra-tab-count">' + n + "</span></button>";
@@ -212,13 +218,16 @@
 
   /* ---------- overview: page ---------- */
   function hubHTML() {
-    const skelKpis = [0, 1, 2, 3, 4].map(function (i) { return '<div class="ra-skel kpi" id="ra-k' + i + '"></div>'; }).join("");
+    // ROLE RULE: Staff do not see Revenue / Total costs / Net profit (KPIs 0-2) or the revenue chart.
+    const fin = canViewFinancialReports();
+    const skelKpis = [0, 1, 2, 3, 4].filter(function (i) { return fin || i >= 3; })
+      .map(function (i) { return '<div class="ra-skel kpi" id="ra-k' + i + '"></div>'; }).join("");
     const skel = '<div class="ra-skel chart"></div>';
     return '<header class="ra-head"><div><h1>Reports &amp; Analytics</h1><p>' + (farmName() ? esc(farmName()) + " · " : "") + esc(rangeText()) + "</p></div>" +
       '<div class="ra-head-tools">' + periodSelect() + '<button class="ra-btn" type="button" data-rpt-action="print">' + R.icon("download", 16) + "Print</button></div></header>" +
       '<div class="ra-kpis" id="ra-kpis">' + skelKpis + "</div>" +
-      '<div class="ra-grid two">' +
-        R.chartCard({ title: "Revenue vs expenses", sub: "Expense records only; feed and medicine costs are in the P&L", tools: segHTML("rev", [["line", "Line"], ["bar", "Bars"]], S.rev), body: '<div id="ra-rev-body">' + skel + "</div>" }) +
+      '<div class="ra-grid ' + (fin ? "two" : "") + '">' +
+        (fin ? R.chartCard({ title: "Revenue vs expenses", sub: "Expense records only; feed and medicine costs are in the P&L", tools: segHTML("rev", [["line", "Line"], ["bar", "Bars"]], S.rev), body: '<div id="ra-rev-body">' + skel + "</div>" }) : "") +
         R.chartCard({ title: "Egg production", sub: "Eggs per day in the selected period", tools: segHTML("egg", [["saleable", "Saleable"], ["collected", "Collected"]], S.egg), body: '<div id="ra-egg-body">' + skel + "</div>" }) +
       "</div>" +
       '<div class="ra-toolbar"><div class="ra-search">' + R.icon("search", 16) + '<input id="ra-search" type="search" placeholder="Search reports..." aria-label="Search reports" autocomplete="off" value="' + esc(S.search) + '"></div>' +
@@ -278,6 +287,9 @@
     const r = root();
     if (!r) return;
     const seq = ++S.seq, farmId = state.farmId, range = bounds();
+    const fin = canViewFinancialReports();   // ROLE RULE: false for Staff
+    // The Financial tab does not exist for Staff, so never stay parked on it (for example after switching farms).
+    if (!fin && S.tab === "Financial") S.tab = "all";
     R.destroyAll();
     S.c = { rev: null, egg: null };
     S.t = { sales: null, expense: null, production: null, gb: "day", pgb: "day" };
@@ -292,22 +304,24 @@
       $("#ra-cards").innerHTML = errBox((e && e.message) || "The reports could not be loaded.");
     });
 
-    // KPI 1-3: Revenue, Total costs, Net profit (P&L, with previous period)
-    AgroAPI.getReport(farmId, "pl", range).then(function (d) {
-      if (!alive()) return;
-      try {
-        const f = plFig(d), n = f.net.cur;
-        setKpi(0, R.kpiCard({ icon: "wallet", label: "Revenue", value: mny(f.revenue.cur), cur: f.revenue.cur, prev: f.revenue.prev }));
-        setKpi(1, R.kpiCard({ icon: "chart", label: "Total costs", value: mny(f.costs.cur), cur: f.costs.cur, prev: f.costs.prev, inverse: true, tone: "amber" }));
-        setKpi(2, R.kpiCard({ icon: "trend", label: "Net profit", value: mny(n), cur: n, prev: f.net.prev, neg: n !== null && n < 0, tone: n !== null && n < 0 ? "red" : "" }));
-      } catch (err) {
-        console.error("Reports overview: P&L cards failed", err);
+    // KPI 1-3: Revenue, Total costs, Net profit (P&L, with previous period). Not requested at all for Staff.
+    if (fin) {
+      AgroAPI.getReport(farmId, "pl", range).then(function (d) {
+        if (!alive()) return;
+        try {
+          const f = plFig(d), n = f.net.cur;
+          setKpi(0, R.kpiCard({ icon: "wallet", label: "Revenue", value: mny(f.revenue.cur), cur: f.revenue.cur, prev: f.revenue.prev }));
+          setKpi(1, R.kpiCard({ icon: "chart", label: "Total costs", value: mny(f.costs.cur), cur: f.costs.cur, prev: f.costs.prev, inverse: true, tone: "amber" }));
+          setKpi(2, R.kpiCard({ icon: "trend", label: "Net profit", value: mny(n), cur: n, prev: f.net.prev, neg: n !== null && n < 0, tone: n !== null && n < 0 ? "red" : "" }));
+        } catch (err) {
+          console.error("Reports overview: P&L cards failed", err);
+          setKpi(0, unavailable("wallet", "Revenue")); setKpi(1, unavailable("chart", "Total costs")); setKpi(2, unavailable("trend", "Net profit"));
+        }
+      }, function () {
+        if (!alive()) return;
         setKpi(0, unavailable("wallet", "Revenue")); setKpi(1, unavailable("chart", "Total costs")); setKpi(2, unavailable("trend", "Net profit"));
-      }
-    }, function () {
-      if (!alive()) return;
-      setKpi(0, unavailable("wallet", "Revenue")); setKpi(1, unavailable("chart", "Total costs")); setKpi(2, unavailable("trend", "Net profit"));
-    });
+      });
+    }
 
     // KPI 4 + egg chart: production stats and trend
     AgroAPI.getRecordsReport(farmId, "production", range).then(function (rep) {
@@ -333,7 +347,7 @@
       catch (err) { console.error("Reports overview: feed card failed", err); setKpi(4, unavailable("clock", "Feed days left")); }
     }, function () { if (alive()) setKpi(4, unavailable("clock", "Feed days left")); });
 
-    // Revenue vs expenses chart: sales + expense trends (drawn once both have answered)
+    // Revenue vs expenses chart: sales + expense trends (drawn once both have answered). Not requested for Staff.
     const trendDone = function (slot, rep, failed) {
       if (!alive()) return;
       S.t[slot] = { rows: failed ? [] : ((rep && rep.trend) || []), err: failed || !!(rep && rep.errors && rep.errors.trend) };
@@ -341,8 +355,10 @@
       if (p && p.group_by) S.t.gb = p.group_by;
       drawRev();
     };
-    AgroAPI.getRecordsReport(farmId, "sales", range).then(function (rep) { trendDone("sales", rep, false); }, function () { trendDone("sales", null, true); });
-    AgroAPI.getRecordsReport(farmId, "expense", range).then(function (rep) { trendDone("expense", rep, false); }, function () { trendDone("expense", null, true); });
+    if (fin) {
+      AgroAPI.getRecordsReport(farmId, "sales", range).then(function (rep) { trendDone("sales", rep, false); }, function () { trendDone("sales", null, true); });
+      AgroAPI.getRecordsReport(farmId, "expense", range).then(function (rep) { trendDone("expense", rep, false); }, function () { trendDone("expense", null, true); });
+    }
   }
 
 
@@ -554,6 +570,11 @@
     S.seq++;
     let key = "";
     try { key = sub ? decodeURIComponent(sub) : ""; } catch (e) { key = ""; }
+    // ROLE RULE: a Staff user who types #/reports/pl (or any financial report) lands on the overview instead.
+    if (key && !canViewReport(key)) {
+      key = "";
+      try { history.replaceState(null, "", location.pathname + location.search + "#/reports"); } catch (e) { /* ignore */ }
+    }
     S.search = key ? S.search : (state.query || "");
     queueMicrotask(function () {
       const r = root();

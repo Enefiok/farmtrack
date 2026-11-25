@@ -14,7 +14,10 @@
   function route() {
     const [, page = "dashboard", sub] = location.hash.split("/");
     if (page === "notifications") return { page: window.AgroNotif ? AgroNotif.originPage() : "dashboard", sub, notifications: true }; // sidebar keeps highlighting the page you came from
-    const p = NAV.some((n) => n[0] === page) ? page : "dashboard";
+    let p = NAV.some((n) => n[0] === page) ? page : "dashboard";
+    // A typed #/users by someone who is not an Owner or Administrator goes to the dashboard.
+    // The farm() check matters: before farms load there is no role yet, and we must not bounce on refresh.
+    if (farm() && !canAccessPage(p)) p = "dashboard";
     return { page: p, sub };
   }
 
@@ -47,7 +50,7 @@
 
   function renderNav() {
     const { page } = route();
-    $("#nav").innerHTML = NAV.map(([k, l]) =>
+    $("#nav").innerHTML = NAV.filter(([k]) => canAccessPage(k)).map(([k, l]) =>
       `<a class="nav-link" href="#/${k}" ${k === page ? 'aria-current="page"' : ""}>${icon(NAV_ICON[k], 18)}<span>${esc(l)}</span></a>`).join("");
   }
 
@@ -63,7 +66,6 @@
     if (!state.farms.length) { view.innerHTML = noFarmView(); return; }
     if (params.has("restricted") && page === "dashboard") { view.innerHTML = restrictedView(); return; } // preview of the design
     if (route().notifications) { view.innerHTML = notificationsView(sub); document.title = "Notifications | AgroFlow"; return; }
-    if (page === "users" && !canManageUsers()) { view.innerHTML = restrictedView(); return; }
     if (page === "dashboard") {
       if (state.inventory.farmId !== state.farmId) state.inventory = { items: [], units: [], status: "idle", farmId: state.farmId };
       if (state.inventory.status === "idle") loadInventory();
@@ -79,6 +81,11 @@
       view.innerHTML = inventoryView();
     } else if (page === "reports") {
       view.innerHTML = reportsView(sub);
+    } else if (page === "users") {
+      // Only Owners and Administrators can reach this page (see canAccessPage in permissions.js).
+      if (!state.users || state.users.farmId !== state.farmId) state.users = { farmId: state.farmId, members: [], invites: [], status: "idle" };
+      if (state.users.status === "idle") loadUsers();
+      view.innerHTML = usersView();
     } else {
       view.innerHTML = comingSoon(names[page]);
     }

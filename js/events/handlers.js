@@ -19,6 +19,8 @@
   }
   window.addEventListener("scroll", () => closeMenus(), true);
   const closeNav = () => document.body.classList.remove("nav-open");
+  // A hidden button is not enough on its own, so every edit action also checks the role here.
+  const allowed = (ok) => { if (!ok) denyToast(); return ok; };
 
   document.addEventListener("click", (e) => {
     const t = e.target;
@@ -49,18 +51,18 @@
       case "add-record": openModal(act.dataset.type, act); break;
       case "add-existing": openModal("opening", act); break;
       case "view-flock": openViewFlockModal(act.dataset.id, act); break;
-      case "sell-flock": openSellFlockModal(act.dataset.id, act); break;
-      case "adjust-record": openAdjustModal(act.dataset.rtype, act.dataset.id, act); break;
-      case "record-payment": openPaymentModal(act.dataset.id, act.dataset.rtype, act); break;
+      case "sell-flock": if (!allowed(canEdit("sales"))) break; openSellFlockModal(act.dataset.id, act); break;
+      case "adjust-record": if (!allowed(canEdit(act.dataset.rtype))) break; openAdjustModal(act.dataset.rtype, act.dataset.id, act); break;
+      case "record-payment": if (!allowed(canEdit(act.dataset.rtype))) break; openPaymentModal(act.dataset.id, act.dataset.rtype, act); break;
       case "view-production": openViewProductionModal(act.dataset.id, act); break;
       case "view-activity": openViewActivityModal(act.dataset.id, act); break;
       case "view-purchase": openViewPurchaseModal(act.dataset.id, act); break;
       case "view-sale": openViewSaleModal(act.dataset.id, act); break;
       case "view-expense": openViewExpenseModal(act.dataset.id, act); break;
       case "add-item": openItemModal(null, act); break;
-      case "edit-item": openEditItemModal(findItem(act.dataset.id), act); break;
-      case "archive-item": archiveItemAction(findItem(act.dataset.id)); break;
-      case "manage-conversions": openConversionsModal(act.dataset.id, act); break;
+      case "edit-item": if (!allowed(canEdit("inventory"))) break; openEditItemModal(findItem(act.dataset.id), act); break;
+      case "archive-item": if (!allowed(canEdit("inventory"))) break; archiveItemAction(findItem(act.dataset.id)); break;
+      case "manage-conversions": if (!allowed(canEdit("inventory"))) break; openConversionsModal(act.dataset.id, act); break;
       case "stock-history": openStockHistoryModal(act.dataset.id, act); break;
       case "export-inventory": exportInventory(); break;
       case "inv-chart-view": state.invChartView = act.dataset.view; renderView(); break;
@@ -186,6 +188,8 @@
     const { page, sub } = route();
     // Opening Inventory shows what we have and quietly re-fetches the item list
        if ((page === "inventory" || page === "dashboard") && state.status === "ready" && state.inventory.status === "ready") loadInventory(true);
+    // Opening Users & Permissions shows what we have and quietly re-fetches the team and invitations
+    if (page === "users" && state.status === "ready" && state.users && state.users.status === "ready") loadUsers(true);
     if (page === "records" && state.status === "ready" && !DEV) {
       const type = pickTab(sub);
       api.refresh(type)

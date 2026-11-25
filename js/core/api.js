@@ -44,6 +44,8 @@
       notifications: "/api/farms/{farm}/notifications/",
       targets: "/api/farms/{farm}/targets/",
       forecasts: "/api/farms/{farm}/forecasts/",
+      // Users & Permissions: the farm's team members.
+      members: "/api/farms/{farm}/members/",
     },
     DEFAULTS: { eggUnitId: 2, eggItemId: null },
   };
@@ -1645,6 +1647,31 @@
       if (metric) params.append('metric', metric);
       if (days) params.append('days', days);
       return await request("GET", farmUrl("forecasts", farmId) + '?' + params.toString());
+    },
+
+    // --- Users & Permissions ---
+    // List the members of a farm (the farmUrl for "members" already ends with a slash).
+    listFarmMembers: async function (farmId) {
+      const d = await request("GET", farmUrl("members", farmId));
+      return Array.isArray(d) ? d : (d && (d.results || d.members || d.items)) || [];
+    },
+    // data = { email, farm_id, role }
+    inviteUser: function (data) {
+      return request("POST", "/api/invitations/", Object.assign({}, data, { farm_id: toId(data.farm_id) }));
+    },
+    listPendingInvites: async function (farmId) {
+      const d = await request("GET", "/api/invitations/manage/?farm_id=" + encodeURIComponent(farmId));
+      return Array.isArray(d) ? d : (d && (d.results || d.invitations || d.items)) || [];
+    },
+    // data = { invitation_id, farm_id }
+    revokeInvitation: function (data) {
+      return request("DELETE", "/api/invitations/manage/", { invitation_id: toId(data.invitation_id), farm_id: toId(data.farm_id) });
+    },
+    updateMemberRole: function (farmId, membershipId, role) {
+      return request("PATCH", farmUrl("members", farmId) + encodeURIComponent(membershipId) + "/role/", { role: role });
+    },
+    removeMember: function (farmId, membershipId) {
+      return request("DELETE", farmUrl("members", farmId) + encodeURIComponent(membershipId) + "/remove/");
     },
   };
 
