@@ -1,6 +1,8 @@
 /* js/views/reports.js - Reports & Analytics
    #/reports       overview: KPI strip, two charts, search + group tabs, report cards
    #/reports/:key  one report: frame (back, title, period, print) + the renderer from js/reports/views.js
+   Period Comparison (#/reports/period-comparison) has its own panel: Period A vs Period B, each with a
+   preset or custom From/To dates, a Swap button and a Compare button.
    Needs js/reports/charts.js and js/reports/views.js loaded first (window.RPT).
    Only one global is exposed: reportsView(sub). Click/change handlers use data-rpt-action, never data-action. */
 (function () {
@@ -32,7 +34,7 @@
     ["pl", "Financial", "Revenue, costs and net profit for the period."],
     ["cash-flow", "Financial", "Money in and money out."],
     ["inventory-valuation", "Financial", "What your stock is worth today."],
-    ["period-comparison", "Financial", "This period against the one before."],
+    ["period-comparison", "Financial", "Compare any two date ranges."],
     ["fcr", "Production", "How much feed each crate of eggs costs you."],
     ["hhep", "Production", "Eggs produced per bird housed."],
     ["cost-per-crate", "Production", "The true cost of producing one crate."],
@@ -42,8 +44,9 @@
     ["audit", "Operational", "Every correction made to your records."],
     ["traceability", "Operational", "Follow a day's eggs back to the flock."]
   ].map(function (a) { return { key: a[0], group: a[1], icon: "", title: TITLES[a[0]], desc: a[2] }; });
-  // Reports that take a period. The others are a snapshot (inventory, feed forecast) or take a date (traceability).
-  const DATED = new Set(["pl", "cash-flow", "fcr", "hhep", "cost-per-crate", "flock-roi", "audit", "customer-lifecycle", "period-comparison"]);
+  // Reports that take the single period dropdown. The others are a snapshot (inventory, feed forecast),
+  // take a date (traceability) or have their own Period A / Period B panel (period-comparison).
+  const DATED = new Set(["pl", "cash-flow", "fcr", "hhep", "cost-per-crate", "flock-roi", "audit", "customer-lifecycle"]);
   const PRESETS = [["today", "Today"], ["7d", "Last 7 days"], ["30d", "Last 30 days"], ["month", "This month"], ["lastmonth", "Last month"], ["year", "This year"], ["all", "All time"]];
 
   /* ---------- state (own state, never state.dashPeriod) ---------- */
@@ -375,8 +378,112 @@
     });
   }
 
+  /* ---------- Period Comparison: Period A vs Period B ---------- */
+  const CMP_PRESETS = [["7d", "Last 7 days"], ["week", "This week"], ["lastweek", "Last week"], ["30d", "Last 30 days"], ["month", "This month"], ["lastmonth", "Last month"],
+    ["year", "This year"], ["lastyear", "Last year"], ["custom", "Custom"]];
+  S.cmp = { ready: false, a: { preset: "30d", from: "", to: "" }, b: { preset: "custom", from: "", to: "" } };
+
+  const addDaysISO = function (iso, n) { const p = String(iso).split("-"); return localISO(new Date(+p[0], +p[1] - 1, +p[2] + n)); };
+
+  // Turns a block ({preset, from, to}) into { start, end } ISO dates.
+  function cmpResolve(b) {
+    const now = new Date(), y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+    const dow = (now.getDay() + 6) % 7;          // days since Monday (Mon = 0 ... Sun = 6)
+    switch (b.preset) {
+      case "7d": return { start: localISO(new Date(y, m, d - 6)), end: todayISO() };
+      case "week": return { start: localISO(new Date(y, m, d - dow)), end: todayISO() };                    // Monday to today
+      case "lastweek": return { start: localISO(new Date(y, m, d - dow - 7)), end: localISO(new Date(y, m, d - dow - 1)) };   // last Monday to last Sunday
+      case "30d": return { start: localISO(new Date(y, m, d - 29)), end: todayISO() };
+      case "month": return { start: localISO(new Date(y, m, 1)), end: todayISO() };
+      case "lastmonth": return { start: localISO(new Date(y, m - 1, 1)), end: localISO(new Date(y, m, 0)) };
+      case "year": return { start: localISO(new Date(y, 0, 1)), end: todayISO() };
+      case "lastyear": return { start: localISO(new Date(y - 1, 0, 1)), end: localISO(new Date(y - 1, 11, 31)) };
+      default: return { start: b.from || "", end: b.to || "" };
+    }
+  }
+
+  // Smart default: when Period A changes, suggest Period B.
+  function cmpSuggestB() {
+    const a = S.cmp.a, r = cmpResolve(a), now = new Date(), y = now.getFullYear(), m = now.getMonth();
+    let b = null;
+    if (a.preset === "7d" || a.preset === "30d") {
+      const n = a.preset === "7d" ? 7 : 30, end = addDaysISO(r.start, -1);
+      b = { preset: "custom", from: addDaysISO(end, -(n - 1)), to: end };          // the same number of days right before A
+    } else if (a.preset === "week") b = { preset: "lastweek" };
+    else if (a.preset === "lastweek") {
+      const d = now.getDate(), dow = (now.getDay() + 6) % 7;
+      b = { preset: "custom", from: localISO(new Date(y, m, d - dow - 14)), to: localISO(new Date(y, m, d - dow - 8)) };   // the week before last week
+    } else if (a.preset === "month") b = { preset: "lastmonth" };
+    else if (a.preset === "year") b = { preset: "lastyear" };
+    else if (a.preset === "lastmonth") b = { preset: "custom", from: localISO(new Date(y, m - 2, 1)), to: localISO(new Date(y, m - 1, 0)) };
+    else if (a.preset === "lastyear") b = { preset: "custom", from: localISO(new Date(y - 2, 0, 1)), to: localISO(new Date(y - 2, 11, 31)) };
+    if (b) S.cmp.b = Object.assign({ from: "", to: "" }, b);                       // "custom" on A leaves B alone
+  }
+
+  // Validates both blocks and builds the query params the backend expects.
+  function cmpParams() {
+    const A = cmpResolve(S.cmp.a), B = cmpResolve(S.cmp.b);
+    const bad = function (x, label) {
+      if (!x.start || !x.end) return label + ": choose both a From and a To date.";
+      if (x.start > x.end) return label + ": the From date is after the To date.";
+      return "";
+    };
+    const error = bad(A, "Period A") || bad(B, "Period B");
+    if (error) return { error: error };
+    return {
+      params: { start_date_a: A.start, end_date_a: A.end, start_date_b: B.start, end_date_b: B.end },
+      a: { start_date: A.start, end_date: A.end }, b: { start_date: B.start, end_date: B.end }
+    };
+  }
+
+  function cmpRangeText(blk) {
+    const r = cmpResolve(blk);
+    if (!r.start || !r.end) return "Pick both dates";
+    return r.start > r.end ? "The From date is after the To date" : R.fmtDate(r.start) + " – " + R.fmtDate(r.end);
+  }
+  function cmpBlockHTML(w, title, blk) {
+    const custom = blk.preset === "custom", id = "ra-cmp-" + w;
+    return '<div class="ra-cmp-block"><h3 class="ra-cmp-title">' + title + "</h3>" +
+      '<label class="ra-cmp-lbl" for="' + id + '-preset">Range</label>' +
+      '<select class="ra-select" id="' + id + '-preset">' + CMP_PRESETS.map(function (p) {
+        return '<option value="' + p[0] + '"' + (p[0] === blk.preset ? " selected" : "") + ">" + p[1] + "</option>";
+      }).join("") + "</select>" +
+      '<div class="ra-cmp-custom"' + (custom ? "" : " hidden") + ">" +
+        '<label class="ra-cmp-lbl">From<input class="ra-date" type="date" id="' + id + '-from" value="' + esc(blk.from) + '"></label>' +
+        '<label class="ra-cmp-lbl">To<input class="ra-date" type="date" id="' + id + '-to" value="' + esc(blk.to) + '"></label>' +
+      "</div>" +
+      '<p class="ra-cmp-range" id="' + id + '-range">' + esc(cmpRangeText(blk)) + "</p></div>";
+  }
+  function cmpBlocksHTML() {
+    return cmpBlockHTML("a", "Period A", S.cmp.a) +
+      '<button class="ra-btn ra-cmp-swap" type="button" data-rpt-action="cmp-swap" aria-label="Swap Period A and Period B"><span class="ra-cmp-swap-ico" aria-hidden="true">⇄</span>Swap</button>' +
+      cmpBlockHTML("b", "Period B", S.cmp.b);
+  }
+  function cmpPanelHTML() {
+    if (!S.cmp.ready) { cmpSuggestB(); S.cmp.ready = true; }   // first visit: B = the 30 days before A
+    return '<section class="ra-cmp" aria-label="Compare two periods"><div class="ra-cmp-blocks" id="ra-cmp-blocks">' + cmpBlocksHTML() + "</div>" +
+      '<p class="ra-cmp-err" id="ra-cmp-err" role="alert"></p>' +
+      '<div class="ra-cmp-actions"><button class="ra-btn ra-cmp-go" type="button" data-rpt-action="cmp-run">Compare</button></div></section>';
+  }
+  const paintCmp = function () { const el = $("#ra-cmp-blocks"); if (el) el.innerHTML = cmpBlocksHTML(); };
+  function cmpChange(which, field, val) {
+    const blk = S.cmp[which], err = $("#ra-cmp-err");
+    if (err) err.textContent = "";
+    if (field === "preset") {
+      if (val === "custom") { const cur = cmpResolve(blk); blk.from = cur.start; blk.to = cur.end; }   // start from the dates already shown
+      blk.preset = val;
+      if (which === "a") cmpSuggestB();
+      paintCmp();
+    } else {
+      blk[field] = val;                                   // typing in a date field: no repaint, so focus is kept
+      const rg = $("#ra-cmp-" + which + "-range");
+      if (rg) rg.textContent = cmpRangeText(blk);
+    }
+  }
+
   /* ---------- report page ---------- */
   const subText = function (key) {
+    if (key === "period-comparison") return (farmName() ? farmName() + " · " : "") + "Compare any two date ranges";
     if (key === "traceability") return "Date: " + R.fmtDate(S.date);
     if (DATED.has(key)) return (farmName() ? farmName() + " · " : "") + "Period: " + rangeText();
     return (farmName() ? farmName() + " · " : "") + "As of " + R.fmtDate(todayISO());
@@ -391,6 +498,7 @@
     return '<a class="ra-back" href="#/reports">← All reports</a>' +
       '<header class="ra-frame-head"><div><h1>' + esc(TITLES[key] || R.human(key)) + '</h1><p id="ra-sub">' + esc(subText(key)) + "</p></div>" +
       '<div class="ra-frame-tools ra-head-tools">' + ctl + '<button class="ra-btn" type="button" data-rpt-action="print">' + R.icon("download", 16) + "Print</button></div></header>" +
+      (key === "period-comparison" ? cmpPanelHTML() : "") +
       '<div id="ra-body">' + bodySkeleton() + "</div>";
   }
 
@@ -407,7 +515,15 @@
     const v = R.views[key];
     if (!v) { $("#ra-body").innerHTML = emptyState("This report isn't available yet", "It has no layout in this version of the app."); return; }
     const range = bounds();
-    const params = key === "traceability" ? { date: S.date } : DATED.has(key) ? range : {};
+    let params, cmp = null;
+    if (key === "traceability") params = { date: S.date };
+    else if (key === "period-comparison") {
+      const p = cmpParams(), eb = $("#ra-cmp-err");
+      if (p.error) { if (eb) eb.textContent = p.error; $("#ra-body").innerHTML = ""; return; }
+      if (eb) eb.textContent = "";
+      cmp = { a: p.a, b: p.b };
+      params = p.params;                       // start_date_a, end_date_a, start_date_b, end_date_b
+    } else params = DATED.has(key) ? range : {};
     try {
       const data = (await AgroAPI.getReport(farmId, key, params)) || {};
       if (stale()) return;
@@ -418,7 +534,7 @@
       }
       R.destroyAll();
       let out;
-      try { out = v.render(data, { farmId: farmId, range: range, extra: extra }); }
+      try { out = v.render(data, { farmId: farmId, range: range, extra: extra, cmp: cmp }); }
       catch (err) { console.error("Report render failed:", key, err); out = { html: emptyState("This report could not be displayed", "Open it with ?debug=1 in the address bar to see the raw response.") }; }
       const body = $("#ra-body");
       const debug = new URLSearchParams(location.search).get("debug") === "1"
@@ -462,11 +578,20 @@
       $$('[data-rpt-action="seg"][data-seg="' + id + '"]').forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.val === S[id])); });
       if (id === "rev") drawRev(); else drawEgg();
     }
+    else if (act === "cmp-swap") { const t = S.cmp.a; S.cmp.a = S.cmp.b; S.cmp.b = t; paintCmp(); }
+    else if (act === "cmp-run") {
+      const p = cmpParams(), eb = $("#ra-cmp-err");
+      if (p.error) { if (eb) eb.textContent = p.error; return; }
+      if (eb) eb.textContent = "";
+      loadReport("period-comparison");
+    }
   });
 
   document.addEventListener("change", function (e) {
     const r = root();
     if (!r) return;
+    const cm = /^ra-cmp-([ab])-(preset|from|to)$/.exec(e.target.id || "");
+    if (cm) { cmpChange(cm[1], cm[2], e.target.value); return; }
     if (e.target.id === "ra-period") {
       S.preset = e.target.value;
       if (r.dataset.key) loadReport(r.dataset.key); else loadHub();

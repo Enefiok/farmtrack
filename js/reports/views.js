@@ -10,7 +10,7 @@
      root.innerHTML = RPT.insights(data.insights) + out.html;
      if (out.post) out.post(root);                      // draws the charts
 
-   ctx: { farmId, range: { start_date, end_date } }
+   ctx: { farmId, range: { start_date, end_date }, cmp: { a, b } (period-comparison only) }
 
    Every field read is tolerant: the confirmed backend key first, then
    alternates, then "—". Reports with no sample yet (cash-flow, hhep,
@@ -750,6 +750,11 @@
 
   /* =====================================================================
      12. PERIOD COMPARISON  (key: period-comparison)
+     Period A vs Period B (any two date ranges).
+     The page (js/views/reports.js) sends start_date_a, end_date_a,
+     start_date_b, end_date_b and passes ctx.cmp = { a: {start_date, end_date},
+     b: {start_date, end_date} } so the subtitle can show the dates even if the
+     backend does not echo them back.
      No "higher is better" flag from the backend, so it is decided here.
      ===================================================================== */
   const LOWER_IS_BETTER = /expense|cost|mortality|damage|loss|outstanding|payable/i;
@@ -758,30 +763,49 @@
   const isMoneyMetric = function (m) { return MONEY_METRIC.test(m) && !NOT_MONEY.test(m); };
 
   const periodComparison = {
-    render: function (data) {
+    render: function (data, ctx) {
       data = data || {};
-      const rows = arr(data.rows).map(function (r) { return { metric: textOf(r, ["metric", "label", "name"]) || "—", cur: numOf(r, ["current"]), prev: numOf(r, ["previous"]) }; });
+      const pa = data.period_a && typeof data.period_a === "object" ? data.period_a : {};
+      const pb = data.period_b && typeof data.period_b === "object" ? data.period_b : {};
+      const cmp = (ctx && ctx.cmp) || {};
+      const labelA = textOf(pa, ["label"]) || "Period A";
+      const labelB = textOf(pb, ["label"]) || "Period B";
+      const winText = function (w) {
+        const s = first(w, ["start_date", "start", "from"]), e = first(w, ["end_date", "end", "to"]);
+        return s && e ? fmtDate(s) + " – " + fmtDate(e) : "";
+      };
+      const rangeA = winText(pa) || winText(cmp.a || {}), rangeB = winText(pb) || winText(cmp.b || {});
+      const rangeSub = rangeA && rangeB ? rangeA + " vs " + rangeB : "Period A vs Period B";
+
+      // Rows are read as a/b (or period_a/period_b); the old current/previous keys are the fallback.
+      const rows = arr(data.rows).map(function (r) {
+        return { metric: textOf(r, ["metric", "label", "name"]) || "—", cur: numOf(r, ["a", "period_a", "current"]), prev: numOf(r, ["b", "period_b", "previous"]) };
+      });
       const moneyRows = rows.filter(function (r) { return isMoneyMetric(r.metric); });
       const showPrev = hasPrevious(moneyRows.map(function (r) { return r.prev; }));
       const chartId = uid("pc-chart");
       const t = theme();
       const fmtVal = function (r, v) { return v === null ? "—" : isMoneyMetric(r.metric) ? money(v) : num(v); };
 
-      const html = gridOf("", [R.chartCard({ title: "Money metrics: current vs previous", sub: "Counts such as eggs or birds are in the table", body: R.chartBox(chartId, { empty: !moneyRows.length, emptyText: "No money metrics to chart" }) })]) +
+      const html = gridOf("", [R.chartCard({
+        title: "Money metrics: Period A vs Period B",
+        sub: rangeSub + " · Counts such as eggs or birds are in the table",
+        body: R.chartBox(chartId, { empty: !moneyRows.length, emptyText: "No money metrics to chart" })
+      })]) +
         (rows.length
-          ? table(th("Metric") + th("Current period", true) + th("Previous period", true) + th("Change", true),
+          ? table(th("Metric") + th("Period A", true) + th("Period B", true) + th("Change", true),
               rows.map(function (r) {
                 return "<tr><td>" + esc(r.metric) + '</td><td class="num">' + esc(fmtVal(r, r.cur)) + '</td><td class="num prev">' + esc(fmtVal(r, r.prev)) + '</td><td class="num">' + badge(delta(r.cur, r.prev), LOWER_IS_BETTER.test(r.metric)) + "</td></tr>";
               }).join(""))
-          : emptyState("No comparison data for this period"));
+          : emptyState("No comparison data for these periods"));
 
       return {
         html: html,
         post: function (root) {
           const el = canvasOf(root, chartId);
           if (!el) return;
-          const sets = [{ label: "Current", data: moneyRows.map(function (r) { return r.cur || 0; }), color: t.income }];
-          if (showPrev) sets.push({ label: "Previous", data: moneyRows.map(function (r) { return r.prev || 0; }), color: "#94a3b8" });
+          const sets = [{ label: labelA, data: moneyRows.map(function (r) { return r.cur || 0; }), color: t.income }];
+          if (showPrev) sets.push({ label: labelB, data: moneyRows.map(function (r) { return r.prev || 0; }), color: "#94a3b8" });
           R.bar(el, { labels: moneyRows.map(function (r) { return r.metric; }), datasets: sets, money: true });
         }
       };

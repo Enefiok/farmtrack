@@ -1,7 +1,8 @@
 /* =========================================================================
    reports.css  (css/pages/reports.css)
    Reports & Analytics: overview, KPI strip, chart cards, report cards,
-   report page frame, P&L, feed forecast, customers, audit, print, dark mode.
+   report page frame, P&L, feed forecast, customers, audit, period comparison,
+   print, dark mode.
 
    Load AFTER app.css:
    <link rel="stylesheet" href="../css/pages/app.css">
@@ -355,6 +356,71 @@
 .ra-frame-head h1 { margin: 0; font-size: 1.45rem; }
 .ra-frame-head p { margin: 4px 0 0; color: var(--ra-muted); font-size: 0.88rem; }
 
+/* ---------- Period Comparison: Period A vs Period B panel ---------- */
+.ra-cmp {
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid var(--ra-line);
+  border-radius: var(--ra-radius);
+  background: var(--ra-card);
+}
+.ra-cmp-blocks {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+.ra-cmp-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--ra-line);
+  border-top: 3px solid var(--ra-green);       /* Period A: green, same colour as its bars */
+  border-radius: 12px;
+  background: var(--ra-soft-grey);
+}
+.ra-cmp-block:last-of-type { border-top-color: #94a3b8; }   /* Period B: grey, same colour as its bars */
+.ra-cmp-title { margin: 0; font-size: 1rem; font-weight: 700; }
+.ra-cmp-lbl {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  color: var(--ra-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.ra-cmp-block .ra-select,
+.ra-cmp-block .ra-date { width: 100%; min-width: 0; }
+.ra-cmp-custom { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ra-cmp-custom[hidden] { display: none; }
+.ra-cmp-range { margin: 0; color: var(--ra-muted); font-size: 0.84rem; font-weight: 600; }
+
+.ra-cmp-swap { justify-content: center; gap: 6px; padding: 0 14px; }
+.ra-cmp-swap-ico { display: inline-block; font-size: 1.05rem; line-height: 1; }
+
+.ra-cmp-err { margin: 12px 0 0; min-height: 1.2em; color: var(--ra-red); font-size: 0.86rem; font-weight: 600; }
+.ra-cmp-actions { display: flex; justify-content: flex-end; margin-top: 6px; }
+.ra-cmp-go {
+  justify-content: center;
+  min-width: 140px;
+  background: var(--ra-green);
+  border-color: var(--ra-green);
+  color: #fff;
+}
+.ra-cmp-go:hover { filter: brightness(1.08); }
+
+@media (max-width: 720px) {
+  .ra-cmp { padding: 14px; }
+  .ra-cmp-blocks { grid-template-columns: 1fr; }        /* Period A on top, Period B below */
+  .ra-cmp-swap { justify-self: center; }
+  .ra-cmp-swap-ico { transform: rotate(90deg); }        /* the arrows point up and down */
+  .ra-cmp-actions { justify-content: stretch; }
+  .ra-cmp-go { width: 100%; }
+}
+
 /* ---------- Insights banner ---------- */
 .ra-insights { display: grid; gap: 8px; margin-bottom: 18px; }
 .ra-insight {
@@ -610,6 +676,9 @@ html[data-theme="dark"] .ra-page .ra-rcard:hover { box-shadow: 0 6px 18px rgba(0
   .ra-back,
   .ra-head-tools,
   .ra-frame-tools,
+  .ra-cmp-actions,
+  .ra-cmp-swap,
+  .ra-cmp-err,
   .ra-seg,
   .ra-btn,
   .ra-select,

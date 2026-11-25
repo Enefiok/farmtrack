@@ -729,9 +729,28 @@
     return item.id;
   }
 
+  // ---------- Missing-cost warning ----------
+  // Feed, medication and vaccination usage is costed as quantity x the item's average purchase cost.
+  // If the item was never purchased, that cost is 0, so cost reports would look better than they really are.
+  // The activity is still saved (free samples and forgotten purchases are real), but the user is told.
+  const missingCostMessage = function (itemName) {
+    return "Warning: \"" + itemName + "\" has no recorded cost. The usage was saved, but cost reports will show 0 for it until you record a Purchase for this item.";
+  };
+  // Shows the message with the app's toast() if there is one, otherwise only logs it.
+  // The toast is called as toast(message, "warning"); a toast that ignores the second argument still works.
+  const notifyWarning = function (message) {
+    try {
+      if (typeof global.toast === "function") global.toast(message, "warning");
+      else console.warn(message);
+    } catch (e) {
+      console.warn(message);
+    }
+  };
+
   // Feed consumption must be linked to an inventory item, with the quantity in that item's base unit,
   // so the backend can deduct stock, record cost and build the feed forecast.
-  // Returns { item, quantity } (quantity already converted and rounded to 2 places).
+  // Returns { item, quantity, name, no_cost }. The quantity is already converted and rounded to 2 places.
+  // no_cost is true when the server reports the item's average cost as 0 (it has never been purchased).
   async function resolveFeedLink(farmId, v) {
     const wanted = String(v.feed_item || "").trim().toLowerCase();
     const items = await AgroAPI.listItems(farmId);
@@ -756,19 +775,27 @@
       }
       factor = conv.factor;
     }
-    return { item: item.id, quantity: Math.round(Number(v.quantity) * factor * 100) / 100 };
+    return {
+      item: item.id,
+      quantity: Math.round(Number(v.quantity) * factor * 100) / 100,
+      name: item.name,
+      // Only true when the server actually sent a cost and it is zero. If the server sends no cost
+      // at all (null), nothing is known, so no warning is raised.
+      no_cost: item.current_average_cost != null && item.current_average_cost <= 0
+    };
   }
 
   // Medication and Vaccination let the user type a name that is not in Inventory yet.
   // This makes sure an item with that name exists: if it does not, it is created as a stock-tracked
   // MEDICINE item. The new item's base unit is the unit the user typed (so the quantity needs no
   // conversion), falling back to Piece / Bottle / Vial / Sachet, then to the first unit on the server.
+  // Returns true when a new item had to be created (a brand new item has never been purchased).
   async function ensureMedicineItem(farmId, name, unitName) {
     const wanted = String(name || "").trim().toLowerCase();
-    if (!wanted) return;
+    if (!wanted) return false;
     const items = await AgroAPI.listItems(farmId);
     const exists = items.some(function (i) { return String(i.name).trim().toLowerCase() === wanted; });
-    if (exists) return;
+    if (exists) return false;
 
     const units = await AgroAPI.listUnits();
     const typed = String(unitName || "").trim().toLowerCase();
@@ -785,10 +812,14 @@
       base_unit: base.id,
       is_stock_tracked: true
     });
+    return true;
   }
 
   // Maps the form's field names to the names the backend expects.
-  async function recordBody(type, farmId, v) {
+  // warnings (optional array): any non-blocking warning for the user is pushed here as a text message.
+  // createRecord shows them only after the record has been saved successfully.
+  async function recordBody(type, farmId, v, warnings) {
+    warnings = Array.isArray(warnings) ? warnings : [];
     if (type === "flock") {
       const body = {
         identifier: String(v.identifier).trim(),
@@ -841,6 +872,8 @@
         const link = await resolveFeedLink(farmId, v);
         body.item = link.item;
         body.quantity = link.quantity;
+        // Never blocks the save: the user is only warned (after the save) that cost reports will show 0.
+        if (link.no_cost) warnings.push(missingCostMessage(link.name));
       }
       // Medication & Vaccination: the user can pick a medicine or type a new name.
       // A new name is created in Inventory first (see ensureMedicineItem), then the activity is linked
@@ -850,10 +883,12 @@
         const itemName = String(v.med_item || v.vax_item || v.product || "").trim();
         if (itemName) {
           try {
-            await ensureMedicineItem(farmId, itemName, v.unit);
+            const created = await ensureMedicineItem(farmId, itemName, v.unit);
             const link = await resolveFeedLink(farmId, { feed_item: itemName, quantity: v.quantity, unit: v.unit });
             body.item = link.item;
             body.quantity = link.quantity;
+            // A medicine created just now has never been purchased, so it has no cost either.
+            if (created || link.no_cost) warnings.push(missingCostMessage(link.name));
           } catch (e) {
             // Could not create or link the item -> keep the free-text record, no stock link.
           }
@@ -1097,6 +1132,8 @@
     // Archived items are left out so they no longer appear in the Sales, Purchase and Sell Birds forms.
     // The base unit is included because the Unit dropdown on the Purchase, Sales and Feed forms
     // offers the item's base unit plus the units that have a conversion for it.
+    // current_average_cost is included so Farm Activities can warn when an item has never been purchased.
+    // It is null when the server does not send it.
     listItems: async function (farmId) {
       return (await listAll(farmUrl("items", farmId)))
         .filter(function (i) { return i.is_active !== false; })
@@ -1104,7 +1141,8 @@
           return {
             id: i.id, name: i.name || "", category: i.category || "",
             base_unit: idOf(i.base_unit),
-            base_unit_name: i.base_unit_name || i.base_unit_display || nameOf(i.base_unit) || ""
+            base_unit_name: i.base_unit_name || i.base_unit_display || nameOf(i.base_unit) || "",
+            current_average_cost: i.current_average_cost != null ? n(i.current_average_cost) : null
           };
         });
     },
@@ -1195,18 +1233,24 @@
     createProduction: function (farmId, v) { return AgroAPI.createRecord("production", farmId, v); },
     createActivity: function (farmId, v) { return AgroAPI.createRecord("activity", farmId, v); },
 
+    // Returns { id, warnings }. warnings is a list of non-blocking messages (for example "this item has no
+    // recorded cost"). They have already been shown with toast() once the record was saved; they are also
+    // returned so the calling screen can show them its own way if it prefers.
     createRecord: async function (type, farmId, v) {
       const key = RECORD_KEYS[type];
       if (!key) throw new Error("Unsupported record type: " + type);
       if (isMock) {
         await wait(300);
-        return { id: "m" + Date.now().toString(36) };
+        return { id: "m" + Date.now().toString(36), warnings: [] };
       }
 
-      const body = await recordBody(type, farmId, v);
+      const warnings = [];
+      const body = await recordBody(type, farmId, v, warnings);
       const d = await request("POST", farmUrl(key, farmId), body);
       const rec = (d && (d.flock || d.activity || d.production || d)) || {};
-      return { id: rec.id };
+      // Only warn once the save has worked, so a failed save never shows a warning for nothing.
+      warnings.forEach(notifyWarning);
+      return { id: rec.id, warnings: warnings };
     },
 
     // Update an existing sale. The backend reverses the old stock and applies the new one.

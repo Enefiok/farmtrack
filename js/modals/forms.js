@@ -5,6 +5,8 @@
      MODAL FORMS
      ===================================================================== */
   let modalTrigger = null, saving = false;
+  // true while the zero-cost question is being checked or answered, so a double click cannot start two saves
+  let checking = false;
 
   // Looks a form control up by its name. Do not use form.elements[name] for this: that collection has its own
   // methods (item, namedItem, length), so a field called "item" would return the item() function instead
@@ -12,6 +14,52 @@
   function field(form, name) { return form.elements.namedItem(name); }
 
   function optsOf(f) { return typeof f.options === "function" ? f.options() : f.options || []; }
+
+  /* =====================================================================
+     ZERO-COST GUARD
+     A feed, medication or vaccination entry is only useful for the finances if the item has a cost.
+     If it has none, the quantity is still logged and stock is still deducted, but the cost is 0, so
+     Cost Per Crate and the profit reports look better than they really are.
+     This asks the farmer first. Returns true = go on and save, false = stop (the form stays open).
+     code is the activity code of the selected tab (s.code). It is NOT part of the form values.
+     ===================================================================== */
+  async function confirmZeroCost(type, code, v) {
+    if (type !== "activity") return true;
+    if (code !== "FEED_CONSUMPTION" && code !== "MEDICATION" && code !== "VACCINATION") return true;
+
+    const itemName = String(v.feed_item || v.med_item || v.vax_item || v.product || "").trim();
+    if (!itemName) return true;
+
+    // Read the item's cost fresh from the server (a Purchase may have been recorded a moment ago).
+    // If this cannot be read, the save is never blocked.
+    let item = null;
+    try {
+      const rows = await AgroAPI.listInventory(state.farmId);
+      item = rows.find((i) => String(i.name).trim().toLowerCase() === itemName.toLowerCase()) || null;
+    } catch {
+      return true;
+    }
+
+    const what = code === "FEED_CONSUMPTION" ? "feed" : code === "VACCINATION" ? "vaccine" : "medicine";
+    let reason;
+    if (item) {
+      // The server did not send a cost at all: nothing is known, so do not warn.
+      if (item.current_average_cost == null) return true;
+      if (item.current_average_cost > 0) return true;
+      reason = `"${itemName}" has no recorded cost yet.`;
+    } else if (code === "FEED_CONSUMPTION") {
+      return true; // an unknown feed name is rejected by the save itself with its own message
+    } else {
+      reason = `"${itemName}" is not in your inventory yet, so it will be created with no cost.`;
+    }
+
+    return window.confirm(
+      `${reason}\n\n` +
+      `The quantity will be logged and stock will be deducted, but the cost will be 0, ` +
+      `so your True Cost Per Crate and profit reports will look better than they really are.\n\n` +
+      `Click OK to save anyway, or Cancel to record a Purchase for this ${what} first.`
+    );
+  }
 
   // The input itself (no label and no error line), so it can also be reused inside a grouped row.
   function controlHTML(f) {
@@ -391,9 +439,9 @@
     const onItemEvent = (e) => { if (watches(e.target.name)) syncUnits(form, cur()).then(() => mountDeductPreview(form, cur())); };
     form.addEventListener("change", onItemEvent);
     form.addEventListener("input", (e) => { if (watches(e.target.name, true)) onItemEvent(e); });
-    form.addEventListener("submit", (e) => {
+    form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      if (saving) return;
+      if (saving || checking) return;
       const s = cur();
       const res = collect(form, s);
       const rr = base.rowFields ? collectRows(base.rowFields) : null;
@@ -404,6 +452,13 @@
         return;
       }
       const clean = { ...res.clean, ...(preset && preset.farm_type ? { farm_type: preset.farm_type } : {}), ...(preset && preset.extra ? preset.extra : {}), ...(rr ? { rows: rr.rows } : {}) };
+      // BLOCKING GUARD: if this feed, medication or vaccination entry uses an item with no recorded cost,
+      // the farmer must approve it (or cancel and record a Purchase first) before anything is saved.
+      // s.code is the activity code of the selected tab; it is not one of the form values.
+      checking = true;
+      let go = true;
+      try { go = await confirmZeroCost(type, s.code, clean); } finally { checking = false; }
+      if (!go) return;
       save(type, clean, s, $("#save-btn"), $("#form-error"));
     });
 
