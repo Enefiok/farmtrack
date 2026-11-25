@@ -168,8 +168,7 @@ function dashboardView() {
         ${
           hasEggs()
             ? `<section class="card perf area-perf">
-          ${typeof eggTargetButton === "function" ? eggTargetButton() : ""}
-          <h3>Production performance</h3>
+          <div class="tf-perf-head"><h3>Production performance</h3>${typeof eggTargetButton === "function" ? eggTargetButton() : ""}</div>
           <p class="sub">${dashPeriod()[0] === "today" ? "Today's laying target" : `Laying target, ${per}`}</p>
           <div class="donut">
             <svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="52" fill="none" stroke="var(--line)" stroke-width="9"/>${rate > 0 ? `<circle cx="60" cy="60" r="52" fill="none" stroke="#4f9a67" stroke-width="9" stroke-linecap="round" stroke-dasharray="${(C * Math.min(rate, 100)) / 100} ${C}"/>` : ""}</svg>
@@ -178,7 +177,6 @@ function dashboardView() {
           <div class="split"><div><small>Collected</small><b>${fmtInt(m.eggsToday)}</b></div><div class="vr"></div><div><small>Target</small><b>${fmtInt(m.target)}</b></div></div>
           <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(rate, 100).toFixed(0)}"><i style="width:${Math.min(rate, 100)}%"></i></div>
           <div class="below"><span>${fmtInt(below)} eggs below target</span>${below > 0 && m.target > 0 ? `<button class="chip" data-action="review-flock">Review flock</button>` : ""}</div>
-          ${typeof eggTargetProgress === "function" ? eggTargetProgress() : ""}
         </section>`
             : flockOverviewCard()
         }

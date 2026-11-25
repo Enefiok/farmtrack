@@ -15,10 +15,11 @@
 .area-recent { min-width: 0; }
 
 /* "Add target" button, top-left of the Production performance card, and the monthly egg target inside it */
-.tf-addrow { display: flex; justify-content: flex-start; margin-bottom: 12px; }
+.tf-perf-head { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 4px; }
+.tf-perf-head h3 { margin: 0; }
+.tf-addrow { display: flex; }
+.tf-addrow .tool-btn { height: 28px; padding: 0 10px; font-size: 11px; }
 .tf-addrow .tool-btn { height: 32px; font-size: 12px; }
-.tf-egg .tf-target { margin-top: 14px; padding: 12px 0 0; border-top: 1px solid var(--line); }
-.tf-egg .tf-t-nums { font-size: 14px; }
 .tf-card .card-head { margin-bottom: 12px; align-items: flex-start; }
 .tf-sub { margin: 4px 0 0; font-size: 11px; color: var(--muted); }
 

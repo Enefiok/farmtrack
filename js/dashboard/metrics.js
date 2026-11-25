@@ -78,7 +78,11 @@
       const first = d.production.map((r) => r.date).filter(Boolean).sort()[0];
       days = first ? Math.max(1, Math.round((new Date(localISO(now)) - new Date(first)) / 86400000) + 1) : 1;
     }
-    const target = (state.settings.dailyEggTarget || live) * days;
+    // A monthly egg target (set with "Add target" on this card) drives the circle and the line:
+    // the full target for "This month", shared out per day for any other period.
+    const monthly = typeof eggMonthlyTarget === "function" ? eggMonthlyTarget() : null;
+    const dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const target = monthly ? (dashPeriod()[0] === "month" ? monthly : (monthly / dim) * days) : (state.settings.dailyEggTarget || live) * days;
     return { live, eggsToday: eggs, target, buyAll, stockValue, sellM: sell, days,
     eggsDelta: pct(eggs, eggsPrev), buyDelta: pct(buyAll, buyPrev), sellDelta: pct(sell, sellPrev) };
   }

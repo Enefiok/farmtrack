@@ -1,7 +1,7 @@
 /* js/targets/targets.js - Monthly egg target + Forecast card for the dashboard
    Exposes window.targetsForecastSection(chartCardHTML)  (the Financial Overview card + the Forecast card, side by side),
            window.eggTargetButton()   ("Add target" button at the top-left of the Production performance card),
-           window.eggTargetProgress() (this month's egg target progress, shown inside the Production performance card).
+           window.eggMonthlyTarget()  (this month's egg target, used by the circle + line in Production performance).
    - Targets are for eggs only (the "Add target" window only offers egg measures).
    - Forecast card: expected value with its low-high range and confidence.
    Click handlers use data-tf-action, never data-action. Styles: css/components/targets.css
@@ -118,6 +118,7 @@
       prog = r[0]; fcs = r[1];
     }
     if (seq !== T.seq || id !== state.farmId) return;     // farm changed meanwhile
+    const eggBefore = window.eggMonthlyTarget();
     if (prog.status === "fulfilled") {
       T.targets = listOf(prog.value, "targets"); T.asOf = (prog.value && prog.value.as_of) || null; T.status = "ready"; T.loadedAt = Date.now();
     } else if (T.status !== "ready") T.status = "error";
@@ -126,6 +127,7 @@
       if (!T.fc.list.some(function (f) { return f.metric === T.fc.pick; })) T.fc.pick = pickDefault();
     } else if (T.fc.status !== "ready") T.fc.status = "error";
     paint();
+    if (eggBefore !== window.eggMonthlyTarget() && route().page === "dashboard" && !route().notifications) renderView();
   }
   const pickDefault = function () {
     const l = T.fc.list; if (!l.length) return null;
@@ -202,17 +204,12 @@
     const has = eggTargets().length > 0;
     return '<button class="tool-btn" type="button" data-tf-action="open-targets">' + icon(has ? "edit" : "plus", 14) + (has ? "Edit target" : "Add target") + "</button>";
   }
-  function eggProgInner() {
-    if (T.status !== "ready") return "";
-    return eggTargets().map(function (t) { return '<div class="tf-egg">' + targetRow(t) + "</div>"; }).join("");
-  }
 
   /* ---------- paint ---------- */
   function paint() {
-    const fc = $("#tf-fc"), b = $("#tf-egg-btn"), p = $("#tf-egg-prog");
+    const fc = $("#tf-fc"), b = $("#tf-egg-btn");
     if (fc) fc.innerHTML = forecastCard();
     if (b) b.innerHTML = eggBtnInner();
-    if (p) p.innerHTML = eggProgInner();
   }
   // The Financial Overview card (made by dashboardView) goes on the left, the Forecast card on the right.
   // Only the forecast slot is repainted later, so the chart is never touched.
@@ -223,7 +220,11 @@
     return '<div class="tf-row">' + chart + '<div id="tf-fc" class="tf-slot">' + forecastCard() + "</div></div>";
   };
   window.eggTargetButton = function () { if (!state.farmId) return ""; ensure(); return '<div class="tf-addrow" id="tf-egg-btn">' + eggBtnInner() + "</div>"; };
-  window.eggTargetProgress = function () { if (!state.farmId) return ""; return '<div id="tf-egg-prog">' + eggProgInner() + "</div>"; };
+  window.eggMonthlyTarget = function () {
+    if (T.status !== "ready") return null;
+    const t = eggTargets()[0], v = t ? Number(t.target_value) : 0;
+    return v > 0 ? v : null;
+  };
 
   /* ---------- "Manage targets" window ---------- */
   function metricOptions() {
@@ -243,7 +244,7 @@
     $("#modal-root").innerHTML =
       '<div class="backdrop" id="backdrop"><div class="modal tf-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
       '<button class="close" type="button" data-close aria-label="Close">' + icon("x", 18) + "</button>" +
-      '<h2 id="modal-title">Egg target</h2><p class="sub">' + esc(monthLabel(T.month || thisMonth())) + '. Set how many eggs you want to reach this month. Progress shows in Production performance.</p>' +
+      '<h2 id="modal-title">Egg target</h2><p class="sub">' + esc(monthLabel(T.month || thisMonth())) + '. Set how many eggs you want to reach this month. The circle and line in Production performance use it.</p>' +
       '<div id="tf-mbody"></div></div></div>';
     document.body.style.overflow = "hidden";
     paintModal();
