@@ -182,7 +182,7 @@
       ticks += `<line class="grid-line" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="ax" x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${shortNum(v)}</text>`;
     }
     const every = Math.max(1, Math.ceil(n / (narrow ? 6 : 12))); // keep the x labels from crowding each other
-    const xlab = labels.map((l, i) => (i % every ? "" : `<text class="ax" x="${x(i)}" y="${H - 8}" text-anchor="middle">${esc(l)}</text>`)).join("");
+    const xlab = labels.map((l, i) => (i % every ? "" : `<text class="ax" x="${x(i)}" y="${H - 8}" text-anchor="${i === n - 1 && n > 1 ? "end" : "middle"}">${esc(l)}</text>`)).join("");
     const note = empty ? `<text class="ax" x="${W / 2}" y="${(H - B + T) / 2}" text-anchor="middle">No sales or expenses in this period</text>` : "";
     const lineI = smoothPath(ptsI), lineE = smoothPath(ptsE);
     const area = ptsI.length > 1 ? `${lineI} L${ptsI[ptsI.length - 1].x},${y(0)} L${ptsI[0].x},${y(0)} Z` : "";

@@ -5,8 +5,20 @@
    Uses the app's own variables (--green, --line, --muted, --card, --warn-bg, --warn-text, --error ...).
    ========================================================================= */
 
-.tf-row { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; margin-bottom: 24px; }
+/* Row under the stat cards: Financial Overview (left) + Forecast (right, same 320px column as Production performance below it) */
+.tf-row { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: stretch; margin-bottom: 20px; }
+.tf-row > .area-chart { grid-area: auto; min-width: 0; }
+.tf-slot { display: contents; }
 .tf-card { min-width: 0; }
+/* With the chart moved up, the grid below holds Recent Activity (wide) + Production performance (right column) */
+.dash-grid { grid-template-areas: "recent perf"; }
+.area-recent { min-width: 0; }
+
+/* "Add target" button, top-left of the Production performance card, and the monthly egg target inside it */
+.tf-addrow { display: flex; justify-content: flex-start; margin-bottom: 12px; }
+.tf-addrow .tool-btn { height: 32px; font-size: 12px; }
+.tf-egg .tf-target { margin-top: 14px; padding: 12px 0 0; border-top: 1px solid var(--line); }
+.tf-egg .tf-t-nums { font-size: 14px; }
 .tf-card .card-head { margin-bottom: 12px; align-items: flex-start; }
 .tf-sub { margin: 4px 0 0; font-size: 11px; color: var(--muted); }
 
@@ -54,10 +66,6 @@
 .tf-range-band { position: relative; height: 8px; border-radius: 99px; background: color-mix(in srgb, var(--green) 22%, transparent); }
 .tf-range-mark { position: absolute; top: -3px; width: 4px; height: 14px; margin-left: -2px; border-radius: 2px; background: var(--green); }
 .tf-range-ends { display: flex; justify-content: space-between; margin-top: 6px; font-size: 10px; color: var(--muted); }
-.tf-assume { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
-.tf-assume summary { cursor: pointer; color: var(--muted); }
-.tf-assume summary:hover { color: var(--green); }
-.tf-assume ul { margin: 8px 0 0; padding-left: 18px; line-height: 1.5; }
 
 /* ---------- Manage targets window ---------- */
 .tf-modal { width: min(100%, 560px); }
@@ -75,7 +83,10 @@
 .tf-modal .form-grid { gap: 16px 20px; }
 .tf-actions { gap: 10px; margin-top: 22px; }
 
-@media (max-width: 900px) { .tf-row { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 1100px) {
+  .tf-row { grid-template-columns: minmax(0, 1fr); }
+  .dash-grid { grid-template-areas: "perf" "recent"; }
+}
 @media (max-width: 640px) {
   .tf-modal .form-grid { grid-template-columns: minmax(0, 1fr); }
   .tf-mrow { flex-wrap: wrap; }

@@ -41,7 +41,7 @@
 .nt-btn:focus-visible, .nt-chip:focus-visible, .nt-switch:focus-visible, .nt-back:focus-visible, .nt-link:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 
 /* ---------- bell dropdown (#bell-menu) ---------- */
-#bell-menu.nt-menu { width: min(380px, calc(100vw - 24px)); padding: 0; overflow: hidden; border-radius: 14px; }
+#bell-menu.nt-menu { width: min(380px, calc(100vw - 24px)); padding: 0; overflow: hidden; border-radius: 14px; --nt-line: color-mix(in srgb, var(--line) 55%, transparent); }
 #bell-menu .nt-mhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 16px 10px; }
 #bell-menu .nt-mhead b { display: block; font-size: 15px; font-weight: 600; }
 #bell-menu .nt-mhead span { display: block; margin-top: 3px; font-size: 11px; color: var(--muted); }
@@ -51,7 +51,7 @@
 }
 #bell-menu .nt-link:hover { background: none; text-decoration: underline; }
 #bell-menu .nt-link:disabled { color: var(--muted); cursor: default; text-decoration: none; }
-#bell-menu .nt-mtabs { display: flex; gap: 18px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+#bell-menu .nt-mtabs { display: flex; gap: 18px; padding: 0 16px; border-bottom: 1px solid var(--nt-line); }
 #bell-menu .nt-mtab {
   display: inline-flex; align-items: center; justify-content: flex-start; width: auto; padding: 8px 0; margin-bottom: -1px;
   border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); font-size: 12px; font-weight: 500;
@@ -61,9 +61,10 @@
 #bell-menu .nt-mtab .nt-count { margin-left: 6px; }
 .nt-mlist { display: block; }
 .nt-mrow {
-  display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--nt-line);
   color: inherit; text-decoration: none;
 }
+.nt-mrow:last-child { border-bottom: 0; }   /* the footer draws the line under the list, so there is never a doubled line */
 .nt-mrow:hover { background: var(--green-tint); }
 .nt-mrow.unread { background: color-mix(in srgb, var(--green) 6%, transparent); }
 .nt-mrow.unread:hover { background: var(--green-tint); }
@@ -76,7 +77,7 @@
 .nt-mempty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 16px; font-size: 12px; color: var(--muted); text-align: center; }
 .nt-mempty .spinner { margin: 0; width: 22px; height: 22px; }
 #bell-menu .nt-mfoot {
-  display: flex; align-items: center; justify-content: center; gap: 6px; padding: 13px 16px; border-top: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center; gap: 6px; padding: 13px 16px; border-top: 1px solid var(--nt-line);
   color: var(--green); font-size: 12px; font-weight: 600; text-decoration: none; border-radius: 0;
 }
 #bell-menu .nt-mfoot:hover { background: var(--green-tint); }

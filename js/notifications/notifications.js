@@ -311,7 +311,7 @@
       return '<button type="button" role="tab" class="nt-chip' + (N.tab === t[0] ? " on" : "") + '" aria-selected="' + (N.tab === t[0]) + '" data-notif-action="tab" data-nt-tab="' + t[0] + '">' +
         t[1] + (t[0] === "unread" && u > 0 ? '<span class="nt-count">' + (u > 99 ? "99+" : u) + "</span>" : "") + "</button>";
     }).join("");
-    return '<a class="nt-back" href="#/reports">' + svg("arrowLeft", 14) + "Back to reports</a>" +
+    return '<a class="nt-back" href="' + esc(originHash()) + '">' + svg("arrowLeft", 14) + "Back</a>" +
       '<header class="nt-head"><div><span class="nt-eyebrow">Activity center</span><h1>Notifications</h1><p>Stay updated on important activity across ' + esc(farmName()) + ".</p></div>" +
       '<div class="nt-head-actions"><a class="nt-btn" href="#/notifications/preferences">' + svg("sliders", 16) + "Preferences</a>" +
       '<button type="button" class="nt-btn" data-notif-action="read-all"' + (u > 0 ? "" : " disabled") + ">" + svg("checkCircle", 16) + "Mark all as read</button></div></header>" +
@@ -404,6 +404,26 @@
   function paintList() { const l = $("#nt-list"); if (l) l.innerHTML = listHTML(); }
   function paintAll() { paintBell(); paintPage(); }
 
+  /* ---------- where you came from (sidebar highlight + the Back link) ---------- */
+  const FROM_KEY = "agroflow.notifications.from";
+  const hashOf = function (url) { const i = String(url || "").indexOf("#"); return i < 0 ? "" : url.slice(i); };
+  const isNotifHash = function (h) { return /^#\/notifications(\/|$)/.test(h || ""); };
+  let from = "";
+  try { from = sessionStorage.getItem(FROM_KEY) || ""; } catch (e) { /* storage blocked: we fall back to the dashboard */ }
+  window.addEventListener("hashchange", function (e) {
+    const to = hashOf(e.newURL);
+    if (!isNotifHash(to)) return;
+    const was = hashOf(e.oldURL);
+    if (isNotifHash(was)) return;                          // moving between Notifications and Preferences: keep the real origin
+    from = was || "#/dashboard";
+    try { sessionStorage.setItem(FROM_KEY, from); } catch (err) { /* ignore */ }
+  }, true);
+  const originHash = function () { return from && !isNotifHash(from) ? from : "#/dashboard"; };
+  const originPage = function () {
+    const p = originHash().split("/")[1] || "dashboard";
+    return typeof NAV !== "undefined" && NAV.some(function (n) { return n[0] === p; }) ? p : "dashboard";
+  };
+
   /* ---------- hooks used by the shell ---------- */
   function sync() {
     paintBell();
@@ -419,7 +439,7 @@
     else if (sub !== "preferences" && N.status === "ready" && Date.now() - N.loadedAt > 30000) refresh(true);   // opening the page shows what we have and re-fetches quietly
     return '<div class="nt-page" id="nt-root">' + (sub === "preferences" ? prefsInner() : pageInner()) + "</div>";
   };
-  window.AgroNotif = { sync: sync, paintBell: paintBell };
+  window.AgroNotif = { sync: sync, paintBell: paintBell, originHash: originHash, originPage: originPage };
 
   /* ---------- events ---------- */
   document.addEventListener("click", function (e) {

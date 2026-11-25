@@ -13,7 +13,7 @@
   };
   function route() {
     const [, page = "dashboard", sub] = location.hash.split("/");
-    if (page === "notifications") return { page: "reports", sub, notifications: true }; // Notification Centre: Reports stays highlighted in the sidebar
+    if (page === "notifications") return { page: window.AgroNotif ? AgroNotif.originPage() : "dashboard", sub, notifications: true }; // sidebar keeps highlighting the page you came from
     const p = NAV.some((n) => n[0] === page) ? page : "dashboard";
     return { page: p, sub };
   }
@@ -62,6 +62,7 @@
     if (state.status === "forbidden") { view.innerHTML = restrictedView(); return; }
     if (!state.farms.length) { view.innerHTML = noFarmView(); return; }
     if (params.has("restricted") && page === "dashboard") { view.innerHTML = restrictedView(); return; } // preview of the design
+    if (route().notifications) { view.innerHTML = notificationsView(sub); document.title = "Notifications | AgroFlow"; return; }
     if (page === "users" && !canManageUsers()) { view.innerHTML = restrictedView(); return; }
     if (page === "dashboard") {
       if (state.inventory.farmId !== state.farmId) state.inventory = { items: [], units: [], status: "idle", farmId: state.farmId };
@@ -77,8 +78,7 @@
       if (state.inventory.status === "idle") loadInventory();
       view.innerHTML = inventoryView();
     } else if (page === "reports") {
-      if (route().notifications) { view.innerHTML = notificationsView(sub); document.title = "Notifications | AgroFlow"; }
-      else view.innerHTML = reportsView(sub);
+      view.innerHTML = reportsView(sub);
     } else {
       view.innerHTML = comingSoon(names[page]);
     }

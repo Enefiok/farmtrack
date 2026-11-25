@@ -1,7 +1,9 @@
-/* js/targets/targets.js - Monthly Targets + Forecast cards for the dashboard
-   Exposes window.targetsForecastSection() (returns HTML; dashboardView() calls it once).
-   - Targets card: this month's progress bars (green on track / amber behind / red missed) + "Set targets" window (add / edit / delete).
-   - Forecast card: expected value with its low-high range, confidence, and the assumptions as small print.
+/* js/targets/targets.js - Monthly egg target + Forecast card for the dashboard
+   Exposes window.targetsForecastSection(chartCardHTML)  (the Financial Overview card + the Forecast card, side by side),
+           window.eggTargetButton()   ("Add target" button at the top-left of the Production performance card),
+           window.eggTargetProgress() (this month's egg target progress, shown inside the Production performance card).
+   - Targets are for eggs only (the "Add target" window only offers egg measures).
+   - Forecast card: expected value with its low-high range and confidence.
    Click handlers use data-tf-action, never data-action. Styles: css/components/targets.css
    With ?demo=1 / ?dev=1 (or mock mode) it runs on sample data and never calls the API. */
 (function () {
@@ -156,17 +158,6 @@
       proj + "</div>";
   }
 
-  function targetsCard() {
-    const head = '<div class="card-head"><div><h3>Targets</h3><p class="tf-sub">' + esc(monthLabel(T.month || thisMonth())) + (T.asOf ? " · as of " + esc(dayLabel(T.asOf)) : "") + "</p></div>" +
-      '<button class="tool-btn" type="button" data-tf-action="open-targets">' + icon("plus", 14) + (T.targets.length ? "Manage targets" : "Set targets") + "</button></div>";
-    let body;
-    if (T.status === "loading" || T.status === "idle") body = '<div class="tf-state"><div class="spinner"></div><p>Loading targets…</p></div>';
-    else if (T.status === "error") body = '<div class="tf-state err" role="alert"><p>We couldn\'t load your targets.</p><button class="tool-btn" type="button" data-tf-action="retry">Try again</button></div>';
-    else if (!T.targets.length) body = '<div class="tf-state"><p>No targets set for ' + esc(monthLabel(T.month)) + ". Set a monthly goal to track your progress here.</p></div>";
-    else body = T.targets.map(targetRow).join("");
-    return '<section class="card tf-card" aria-label="Targets">' + head + body + "</section>";
-  }
-
   /* ---------- forecast card ---------- */
   const CONF = { low: "Low confidence", medium: "Medium confidence", high: "High confidence" };
   function rangeBar(f, unit) {
@@ -184,7 +175,6 @@
     const conf = CONF[String(f.confidence || "").toLowerCase()];
     const days = isNum(f.days_ahead) ? Number(f.days_ahead) : FC_DAYS;
     const pct = isNum(f.range_confidence_pct) ? Math.round(Number(f.range_confidence_pct)) : null;
-    const assumptions = Array.isArray(f.assumptions) ? f.assumptions.filter(Boolean) : [];
     const tabs = T.fc.list.length > 1 ? '<div class="tf-tabs" role="tablist" aria-label="Forecast metric">' + T.fc.list.map(function (x) {
       return '<button type="button" role="tab" class="tf-tab' + (x.metric === f.metric ? " on" : "") + '" aria-selected="' + (x.metric === f.metric) + '" data-tf-action="pick" data-metric="' + esc(x.metric) + '">' + esc(x.metric_label || humanize(x.metric)) + "</button>";
     }).join("") + "</div>" : "";
@@ -193,10 +183,7 @@
       '<div class="tf-fc-val">' + (hasExp ? esc(fmt(f.expected, unit)) : '<span class="tf-na">Not enough data yet</span>') + "</div>" +
       (hasRange
         ? '<p class="tf-fc-range">Range: ' + esc(fmt(f.range_low, unit, true)) + " – " + esc(fmt(f.range_high, unit, true)) + (pct ? " (" + pct + "% likely to land in this range)" : "") + "</p>" + rangeBar(f, unit)
-        : hasExp ? '<p class="tf-fc-range">Range unavailable for this forecast.</p>' : "") + "</div>" +
-      (assumptions.length
-        ? '<details class="tf-assume"><summary>How is this worked out?</summary><ul>' + assumptions.map(function (a) { return "<li>" + esc(a) + "</li>"; }).join("") + "</ul></details>"
-        : "");
+        : hasExp ? '<p class="tf-fc-range">Range unavailable for this forecast.</p>' : "") + "</div>";
   }
   function forecastCard() {
     let body;
@@ -207,33 +194,56 @@
     return '<section class="card tf-card" aria-label="Forecast"><div class="card-head"><div><h3>Forecast</h3><p class="tf-sub">An estimate, not a promise' + (T.fc.asOf ? " · as of " + esc(dayLabel(T.fc.asOf)) : "") + "</p></div></div>" + body + "</section>";
   }
 
+  /* ---------- eggs-only targets ---------- */
+  const isEggMetric = function (metric) { return /EGG/i.test(metric) || /egg/i.test(metricInfo(metric).label); };
+  const eggTargets = function () { return T.targets.filter(function (t) { return isEggMetric(t.metric); }); };
+
+  function eggBtnInner() {
+    const has = eggTargets().length > 0;
+    return '<button class="tool-btn" type="button" data-tf-action="open-targets">' + icon(has ? "edit" : "plus", 14) + (has ? "Edit target" : "Add target") + "</button>";
+  }
+  function eggProgInner() {
+    if (T.status !== "ready") return "";
+    return eggTargets().map(function (t) { return '<div class="tf-egg">' + targetRow(t) + "</div>"; }).join("");
+  }
+
   /* ---------- paint ---------- */
-  const inner = function () { return targetsCard() + forecastCard(); };
-  function paint() { const r = $("#tf-root"); if (r) r.innerHTML = inner(); }
-  window.targetsForecastSection = function () {
-    if (!state.farmId) return "";
+  function paint() {
+    const fc = $("#tf-fc"), b = $("#tf-egg-btn"), p = $("#tf-egg-prog");
+    if (fc) fc.innerHTML = forecastCard();
+    if (b) b.innerHTML = eggBtnInner();
+    if (p) p.innerHTML = eggProgInner();
+  }
+  // The Financial Overview card (made by dashboardView) goes on the left, the Forecast card on the right.
+  // Only the forecast slot is repainted later, so the chart is never touched.
+  window.targetsForecastSection = function (chartCardHTML) {
+    const chart = chartCardHTML || "";
+    if (!state.farmId) return chart;
     ensure();
-    return '<div class="tf-row" id="tf-root">' + inner() + "</div>";
+    return '<div class="tf-row">' + chart + '<div id="tf-fc" class="tf-slot">' + forecastCard() + "</div></div>";
   };
+  window.eggTargetButton = function () { if (!state.farmId) return ""; ensure(); return '<div class="tf-addrow" id="tf-egg-btn">' + eggBtnInner() + "</div>"; };
+  window.eggTargetProgress = function () { if (!state.farmId) return ""; return '<div id="tf-egg-prog">' + eggProgInner() + "</div>"; };
 
   /* ---------- "Manage targets" window ---------- */
   function metricOptions() {
     const seen = {}, out = [];
-    const add = function (m) { if (m && !seen[m]) { seen[m] = 1; out.push(m); } };
+    const add = function (m) { if (m && !seen[m] && isEggMetric(m)) { seen[m] = 1; out.push(m); } };
     T.fc.list.forEach(function (f) { add(f.metric); });
     T.targets.forEach(function (t) { add(t.metric); });
-    if (!out.length) { add("REVENUE"); add("EXPENSES"); }
+    if (!out.length) out.push("SALEABLE_EGGS");   // nothing came back from the server yet: the usual egg measure
     return out;
   }
-  const blankForm = function () { return { metric: "", value: "" }; };
+  const blankForm = function () { const o = metricOptions(); return { metric: o.length === 1 ? o[0] : "", value: "" }; };
 
   function openTargetsModal(trigger) {
     modalTrigger = trigger || document.activeElement;
     T.modal = { editId: null, confirmId: null, saving: false, error: "", errs: {}, form: blankForm() };
+    const eggs = metricOptions(); if (eggs.length === 1) T.modal.form.metric = eggs[0];   // only one egg measure: no need to choose
     $("#modal-root").innerHTML =
       '<div class="backdrop" id="backdrop"><div class="modal tf-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
       '<button class="close" type="button" data-close aria-label="Close">' + icon("x", 18) + "</button>" +
-      '<h2 id="modal-title">Monthly targets</h2><p class="sub">' + esc(monthLabel(T.month || thisMonth())) + '. Set one goal per measure; progress shows on your dashboard.</p>' +
+      '<h2 id="modal-title">Egg target</h2><p class="sub">' + esc(monthLabel(T.month || thisMonth())) + '. Set how many eggs you want to reach this month. Progress shows in Production performance.</p>' +
       '<div id="tf-mbody"></div></div></div>';
     document.body.style.overflow = "hidden";
     paintModal();
@@ -243,7 +253,8 @@
   function paintModal() {
     const body = $("#tf-mbody"), m = T.modal;
     if (!body || !m) return;
-    const rows = T.targets.length ? '<ul class="tf-mlist">' + T.targets.map(function (t) {
+    const mine = eggTargets();
+    const rows = mine.length ? '<ul class="tf-mlist">' + mine.map(function (t) {
       const info = metricInfo(t.metric), confirm = String(m.confirmId) === String(t.id);
       return '<li class="tf-mrow"><div><b>' + esc(info.label) + "</b><span>" + esc(fmt(t.target_value, info.unit)) + "</span></div><div class=\"tf-mact\">" +
         (confirm
@@ -251,13 +262,13 @@
           : '<button type="button" class="tool-btn" data-tf-action="edit" data-id="' + esc(t.id) + '" aria-label="Edit ' + esc(info.label) + ' target">' + icon("edit", 14) + 'Edit</button>' +
             '<button type="button" class="tool-btn" data-tf-action="del" data-id="' + esc(t.id) + '" aria-label="Delete ' + esc(info.label) + ' target">Delete</button>') +
         "</div></li>";
-    }).join("") + "</ul>" : '<p class="tf-mnone">No targets yet for this month.</p>';
+    }).join("") + "</ul>" : '<p class="tf-mnone">No egg target yet for this month.</p>';
     const editing = m.editId !== null;
     const opts = metricOptions();
     const unit = m.form.metric ? metricInfo(m.form.metric).unit : "";
     const e = m.errs || {};
     body.innerHTML = rows +
-      '<form id="tf-form" novalidate><h3 class="tf-fh">' + (editing ? "Edit target" : "Add a target") + "</h3><div class=\"form-grid\">" +
+      '<form id="tf-form" novalidate><h3 class="tf-fh">' + (editing ? "Edit target" : "Add an egg target") + "</h3><div class=\"form-grid\">" +
       '<div class="field' + (e.metric ? " invalid" : "") + '"><label for="tf-f-metric">Measure</label><div class="control select"><select id="tf-f-metric" name="metric"' + (editing ? " disabled" : "") + ">" +
       '<option value=""' + (m.form.metric ? "" : " selected") + ' disabled hidden>Choose a measure</option>' +
       opts.map(function (o) { return '<option value="' + esc(o) + '"' + (o === m.form.metric ? " selected" : "") + ">" + esc(metricInfo(o).label) + "</option>"; }).join("") + "</select>" + icon("chevronDown", 18) + "</div><p class=\"error\" role=\"alert\">" + esc(e.metric || "") + "</p></div>" +
@@ -304,7 +315,7 @@
     m.errs = {}; m.error = "";
     if (!metric) m.errs.metric = "Choose a measure.";
     if (raw === "" || !isFinite(value) || value <= 0) m.errs.value = "Enter an amount greater than zero.";
-    if (m.editId === null && metric && T.targets.some(function (t) { return t.metric === metric; })) m.errs.metric = metricInfo(metric).label + " already has a target this month. Edit it above.";
+    if (m.editId === null && metric && T.targets.some(function (t) { return t.metric === metric; })) m.errs.metric = "There is already an egg target for this month. Edit it above.";
     if (m.errs.metric || m.errs.value) { paintModal(); const el = $(m.errs.metric ? "#tf-f-metric" : "#tf-f-value"); if (el) el.focus(); return; }
     const fid = state.farmId, wasEdit = m.editId !== null;
     m.saving = true; paintModal();

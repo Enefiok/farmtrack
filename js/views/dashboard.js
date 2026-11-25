@@ -129,6 +129,22 @@ function dashboardView() {
   state.actPage = actPage;
   const acts = allActs.slice(actPage * ACT_PAGE, (actPage + 1) * ACT_PAGE);
 
+  const chartCard = `<section class="card area-chart">
+          <div class="card-head">
+            <h3>Financial Overview</h3>
+            <div class="legend">
+              <span>Income <i style="background:#147a3a"></i></span>
+              <span>Expenses <i style="background:#f3b93a"></i></span>
+              ${fin.gran === "day" ? "" : `<select class="range" id="range" aria-label="Chart view">
+                <option value="monthly" ${state.range === "monthly" ? "selected" : ""}>Monthly View</option>
+                <option value="quarterly" ${state.range === "quarterly" ? "selected" : ""}>Quarterly View</option>
+              </select>`}
+            </div>
+          </div>
+          <p class="sub">Sales against purchases and expenses, ${per}. Based on amounts recorded, not cash received.</p>
+          <div class="chart" id="chart">${chartHTML(fin)}</div>
+        </section>`;
+
   return `
       <div class="page-head">
       <div><h1>${greet}!</h1><p>Here's what's happening at ${esc(farm().name)} ${GREET_PERIOD[dashPeriod()[0]] || "today"}.</p></div>
@@ -146,28 +162,13 @@ function dashboardView() {
         ${statCard("trend", "Sales", fmtMoney0(m.sellM), m.sellDelta, "From previous period")}
       </div>
 
-      ${typeof targetsForecastSection === "function" ? targetsForecastSection() : ""}
+      ${typeof targetsForecastSection === "function" ? targetsForecastSection(chartCard) : chartCard}
 
       <div class="dash-grid">
-        <section class="card area-chart">
-          <div class="card-head">
-            <h3>Financial Overview</h3>
-            <div class="legend">
-              <span>Income <i style="background:#147a3a"></i></span>
-              <span>Expenses <i style="background:#f3b93a"></i></span>
-              ${fin.gran === "day" ? "" : `<select class="range" id="range" aria-label="Chart view">
-                <option value="monthly" ${state.range === "monthly" ? "selected" : ""}>Monthly View</option>
-                <option value="quarterly" ${state.range === "quarterly" ? "selected" : ""}>Quarterly View</option>
-              </select>`}
-            </div>
-          </div>
-          <p class="sub">Sales against purchases and expenses, ${per}. Based on amounts recorded, not cash received.</p>
-          <div class="chart" id="chart">${chartHTML(fin)}</div>
-        </section>
-
         ${
           hasEggs()
             ? `<section class="card perf area-perf">
+          ${typeof eggTargetButton === "function" ? eggTargetButton() : ""}
           <h3>Production performance</h3>
           <p class="sub">${dashPeriod()[0] === "today" ? "Today's laying target" : `Laying target, ${per}`}</p>
           <div class="donut">
@@ -177,6 +178,7 @@ function dashboardView() {
           <div class="split"><div><small>Collected</small><b>${fmtInt(m.eggsToday)}</b></div><div class="vr"></div><div><small>Target</small><b>${fmtInt(m.target)}</b></div></div>
           <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(rate, 100).toFixed(0)}"><i style="width:${Math.min(rate, 100)}%"></i></div>
           <div class="below"><span>${fmtInt(below)} eggs below target</span>${below > 0 && m.target > 0 ? `<button class="chip" data-action="review-flock">Review flock</button>` : ""}</div>
+          ${typeof eggTargetProgress === "function" ? eggTargetProgress() : ""}
         </section>`
             : flockOverviewCard()
         }
