@@ -73,18 +73,18 @@
       const mid = "um-" + esc(m.id);
       const action = isMe
         ? `<span style="color:var(--muted)">You</span>`
-        : locked ? "" : `<button class="icon-btn square" type="button" data-menu="${mid}" data-fixed aria-label="Actions for ${who}" aria-haspopup="menu">${icon("more", 18)}</button>
+        : locked ? "" : `<div class="menu-wrap" style="display:inline-block"><button class="icon-btn square row-btn" type="button" data-menu="${mid}" data-fixed aria-label="Actions for ${who}" aria-haspopup="menu">${icon("more", 16)}</button>
            <div class="menu tbl-menu" id="${mid}" role="menu" hidden>
              <button class="menu-item" type="button" role="menuitem" data-user-action="change-role" data-id="${esc(m.id)}"><span class="mi-txt"><b>Change role</b></span></button>
              <button class="menu-item" type="button" role="menuitem" data-user-action="remove" data-id="${esc(m.id)}" style="color:var(--error,#c62828)"><span class="mi-txt"><b>Remove user</b></span></button>
-           </div>`;
+           </div></div>`;
       const you = isMe ? ` <small style="color:var(--muted)">(You)</small>` : "";
       return `<tr><td class="item-name">${esc(m.name || "—")}${you}</td><td>${esc(m.email || "—")}</td><td>${roleCell}</td>${manage ? `<td class="num">${action}</td>` : ""}</tr>`;
     }).join("");
     const body = state.users.members.length
       ? `<div class="table-wrap"><table><thead><tr><th>Full name</th><th>Email</th><th>Role</th>${manage ? `<th class="num">Actions</th>` : ""}</tr></thead><tbody>${rows}</tbody></table></div>`
       : `<div class="empty-line" style="padding:24px 20px">No team members yet.</div>`;
-    return `<section class="card table-card"><div class="table-head"><div><h3>Team members</h3><p class="sub-line">${fmtInt(state.users.members.length)} on this farm</p></div></div>${body}</section>`;
+    return `<section class="card table-card inv-table"><div class="table-head"><div><h3>Team members</h3><p class="sub-line">${fmtInt(state.users.members.length)} on this farm</p></div></div>${body}</section>`;
   }
 
   function invitesCard() {
@@ -94,7 +94,7 @@
     const body = state.users.invites.length
       ? `<div class="table-wrap"><table><thead><tr><th>Email</th><th>Role</th><th>Date sent</th>${manage ? `<th class="num">Actions</th>` : ""}</tr></thead><tbody>${rows}</tbody></table></div>`
       : `<div class="empty-line" style="padding:24px 20px">No pending invitations.</div>`;
-    return `<section class="card table-card" style="margin-top:20px"><div class="table-head"><div><h3>Pending invitations</h3><p class="sub-line">Invited but not yet accepted</p></div></div>${body}</section>`;
+    return `<section class="card table-card inv-table" style="margin-top:20px"><div class="table-head"><div><h3>Pending invitations</h3><p class="sub-line">Invited but not yet accepted</p></div></div>${body}</section>`;
   }
 
   function usersView() {

@@ -1,0 +1,67 @@
+/* css/components/theme.css
+   Makes the light / dark toggle (js/components/theme.js) work on top of the existing dark mode.
+   Load AFTER the other stylesheets.
+
+   Your existing dark rules only run when the DEVICE is in dark mode. They are copied here under
+   :root[data-theme="dark"] so the toggle can also force dark mode on a light device.
+   Forcing light on a dark device already works with your existing :not([data-theme="light"]) rules.
+   If you change a dark colour in app.css, notifications.css or reports.css, change it here too. */
+
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+
+/* ---- Copy of the dark block in css/pages/app.css ---- */
+:root[data-theme="dark"] {
+  --green: #3fae6a;
+  --green-d: #34975a;
+  --green-soft: #1f3a2a;
+  --green-tint: #1a2d21;
+  --text: #f2f2f2;
+  --muted: #9a9a9a;
+  --label: #e3e3e3;
+  --line: #2b2b2b;
+  --field: #1e1e1e;
+  --card: #171717;
+  --bg: #101010;
+  --warn-bg: #4a3a10;
+  --warn-text: #f2cf74;
+  --error: #ef7d7d;
+  --ring: rgba(63, 174, 106, .3);
+  --overlay: rgba(0, 0, 0, .65);
+  --page: #101010;
+  --tile: #1f3a2a;
+}
+:root[data-theme="dark"] .farm-btn,
+:root[data-theme="dark"] .btn { color: #0b1f13; }
+:root[data-theme="dark"] .btn.pill { color: var(--text); }
+:root[data-theme="dark"] .badge.neg { background: #4a1f1f; color: #f2a7a2; }
+:root[data-theme="dark"] .cat-chip.cat-feed { --c: #5ccf88; }
+:root[data-theme="dark"] .cat-chip.cat-medicine { --c: #7aa5ff; }
+:root[data-theme="dark"] .cat-chip.cat-egg { --c: #f0c060; }
+:root[data-theme="dark"] .cat-chip.cat-livestock { --c: #b794f6; }
+:root[data-theme="dark"] .cat-chip.cat-supply { --c: #4fd1e8; }
+:root[data-theme="dark"] .cat-chip.cat-equipment { --c: #a8a8a8; }
+:root[data-theme="dark"] .pbadge.warn { --c: #f0a060; }
+
+/* ---- Copy of the dark block in css/components/notifications.css ---- */
+:root[data-theme="dark"] .nt-ico.tone-warn { color: #f0a060; }
+:root[data-theme="dark"] .nt-ico.tone-info { color: #7aa7ee; }
+
+/* ---- New: farm switcher menu (farm-switcher.css has light-only colours that were unreadable in dark) ---- */
+:root[data-theme="dark"] .menu .menu-label,
+:root[data-theme="dark"] .menu .mi-txt small { color: var(--muted); }
+:root[data-theme="dark"] .menu .menu-item:hover,
+:root[data-theme="dark"] .menu .menu-item:focus-visible { background: var(--green-tint); }
+:root[data-theme="dark"] .menu .menu-item.on { background: var(--green-soft); }
+:root[data-theme="dark"] .menu .menu-item.on .i,
+:root[data-theme="dark"] .menu .menu-add { color: var(--green); }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .menu .menu-label,
+  :root:not([data-theme="light"]) .menu .mi-txt small { color: var(--muted); }
+  :root:not([data-theme="light"]) .menu .menu-item:hover,
+  :root:not([data-theme="light"]) .menu .menu-item:focus-visible { background: var(--green-tint); }
+  :root:not([data-theme="light"]) .menu .menu-item.on { background: var(--green-soft); }
+  :root:not([data-theme="light"]) .menu .menu-item.on .i,
+  :root:not([data-theme="light"]) .menu .menu-add { color: var(--green); }
+}
